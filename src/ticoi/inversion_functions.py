@@ -108,7 +108,6 @@ def construction_dates_range_np(data: np.ndarray) -> np.ndarray:
 
     dates = np.concatenate([data[:, 0], data[:, 1]])  # concatante date1 and date2
     dates = np.unique(dates)  # remove duplicates
-    dates = np.sort(dates)  # Sort the dates
     return dates
 
 
