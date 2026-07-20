@@ -60,10 +60,12 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
     # Second order Tikhonov regularisation
     elif regu == "2":
         delta = np.diff(dates_range) / np.timedelta64(1, "D")
-        mu = np.zeros((A.shape[1], A.shape[1]), dtype="float64")
-        mu[range(1, A.shape[1] - 1), range(0, A.shape[1] - 2)] = 1 / delta[:-2]
-        mu[range(1, A.shape[1] - 1), range(1, A.shape[1] - 1)] = -2 / delta[1:-1]
-        mu[range(1, A.shape[1] - 1), range(2, A.shape[1])] = 1 / delta[2:]
+        n_columns = A.shape[1]
+        rows = np.arange(1, n_columns - 1)
+        mu = np.zeros((n_columns, n_columns), dtype="float64")
+        mu[rows, rows - 1] = 1 / delta[:-2]
+        mu[rows, rows] = -2 / delta[1:-1]
+        mu[rows, rows + 1] = 1 / delta[2:]
         mu[0, 0] = 0
         mu[-1, -1] = 0
 

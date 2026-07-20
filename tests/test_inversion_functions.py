@@ -111,6 +111,18 @@ class Test_inversion:
 
         np.testing.assert_array_equal(actual, expected)
 
+    def test_second_order_regularization_matches_range_baseline_exactly(self):
+        delta = np.diff(self.dates_range) / np.timedelta64(1, "D")
+        n_columns = self.A.shape[1]
+        expected = np.zeros((n_columns, n_columns), dtype="float64")
+        expected[range(1, n_columns - 1), range(n_columns - 2)] = 1 / delta[:-2]
+        expected[range(1, n_columns - 1), range(1, n_columns - 1)] = -2 / delta[1:-1]
+        expected[range(1, n_columns - 1), range(2, n_columns)] = 1 / delta[2:]
+
+        actual = mu_regularisation("2", self.A, self.dates_range)
+
+        np.testing.assert_array_equal(actual, expected)
+
     @pytest.mark.parametrize("n_ini", [2, 4])
     def test_direction_regularization_matches_loop_baseline_exactly(self, n_ini):
         n_columns = self.A.shape[1]
