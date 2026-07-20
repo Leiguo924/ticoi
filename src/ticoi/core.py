@@ -1066,20 +1066,28 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
     GB = 1073741824
     blocks = []
     if cube.ds.nbytes > block_size * GB:
-        try:
-            num_elements = np.prod([cube.ds.chunks[dim][0] for dim in cube.ds.chunks.keys()])
-        except ValueError:
-            cube = cube.ds.unify_chunks()  # ValueError: Object has inconsistent chunks along dimension x. This can be fixed by calling unify_chunks().
+        ds = cube.ds.unify_chunks()
+        x_chunks = ds.chunks["x"]
+        y_chunks = ds.chunks["y"]
 
-        chunk_bytes = num_elements * cube.ds["vx"].dtype.itemsize
+        # A processing block keeps its complete temporal axis. Estimate one
+        # spatial tile with every variable, rather than one temporal chunk of
+        # vx only; the old estimate could undershoot memory by a large factor.
+        tile_bytes = ds.isel(x=slice(0, x_chunks[0]), y=slice(0, y_chunks[0])).nbytes
+        nchunks_block = max(1, int(block_size * GB // tile_bytes))
 
-        nchunks_block = int(block_size * GB // chunk_bytes)
+        if verbose and tile_bytes > block_size * GB:
+            print(
+                f"[Block process] Warning: one full-time spatial tile is {tile_bytes / GB:.2f} GB, "
+                f"larger than block_size={block_size:.2f} GB; this is the minimum block footprint "
+                "with the current source chunks."
+            )
 
-        x_step = int(np.sqrt(nchunks_block))
-        y_step = nchunks_block // x_step
+        x_step = max(1, int(np.sqrt(nchunks_block)))
+        y_step = max(1, nchunks_block // x_step)
 
-        nblocks_x = int(np.ceil(len(cube.ds.chunks["x"]) / x_step))
-        nblocks_y = int(np.ceil(len(cube.ds.chunks["y"]) / y_step))
+        nblocks_x = int(np.ceil(len(x_chunks) / x_step))
+        nblocks_y = int(np.ceil(len(y_chunks) / y_step))
 
         nblocks = nblocks_x * nblocks_y
         if verbose:
@@ -1089,13 +1097,13 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
 
         for i in range(nblocks_y):
             for j in range(nblocks_x):
-                x_start = j * x_step * cube.ds.chunks["x"][0]
-                y_start = i * y_step * cube.ds.chunks["y"][0]
-                x_end = x_start + x_step * cube.ds.chunks["x"][0] if j != nblocks_x - 1 else cube.ds.dims["x"]
-                y_end = y_start + y_step * cube.ds.chunks["y"][0] if i != nblocks_y - 1 else cube.ds.dims["y"]
+                x_start = sum(x_chunks[: j * x_step])
+                y_start = sum(y_chunks[: i * y_step])
+                x_end = sum(x_chunks[: (j + 1) * x_step]) if j != nblocks_x - 1 else ds.sizes["x"]
+                y_end = sum(y_chunks[: (i + 1) * y_step]) if i != nblocks_y - 1 else ds.sizes["y"]
                 blocks.append([x_start, x_end, y_start, y_end])
     else:
-        blocks.append([0, cube.ds.dims["x"], 0, cube.ds.dims["y"]])
+        blocks.append([0, cube.ds.sizes["x"], 0, cube.ds.sizes["y"]])
         if verbose:
             print(f"[Block process] Cube size smaller than {block_size}GB, no need to divide")
 
