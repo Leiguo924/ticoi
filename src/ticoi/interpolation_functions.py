@@ -62,11 +62,12 @@ def reconstruct_common_ref(
     data = pd.DataFrame(data_columns)
 
     if second_date_list is not None:
+        reindexed_columns = ("dx", "dy", "error_x", "error_y", "xcount_x", "xcount_y", "xcount_z")
         tmp = pd.DataFrame(
             {
                 "Ref_date": pd.NaT,
                 "Second_date": second_date_list,
-                **{var: np.nan for var in data.columns.difference(["Ref_date", "Second_date"])},
+                **{var: np.nan for var in reindexed_columns if var in data.columns},
             }
         )
 
