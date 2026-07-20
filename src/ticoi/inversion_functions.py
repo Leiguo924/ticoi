@@ -488,6 +488,10 @@ def inversion_one_component(
 
     if linear_operator is None:
         F_regu = np.multiply(coef, mu)
+        condi = Weight != 0
+        W = Weight[condi]
+        weighted_A = np.multiply(W[:, np.newaxis], A[condi])
+        weighted_v = np.multiply(W, v[condi])
     else:
         v = linear_operator.update_from_weight(v, Weight)  # Update v, Weight,
         A_l = sp.linalg.LinearOperator(
@@ -497,8 +501,9 @@ def inversion_one_component(
         )
 
     if solver == "LSMR":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype("float64")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype("float64")
+        F = np.vstack([weighted_A, F_regu]).astype("float64")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
+        del weighted_A, weighted_v, condi, W
         F = sp.csc_matrix(F)  # column-scaling so that each column have the same euclidean norme (i.e. 1)
         X = sp.linalg.lsmr(
             F, D
@@ -511,14 +516,13 @@ def inversion_one_component(
             raise ValueError("Please provide an initialization for the solver LSMR_ini")
         # 16.7 ms ± 141 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
         if not linear_operator:
-            condi = Weight != 0
-            W = Weight[condi]
             F = sp.csc_matrix(
-                np.vstack([np.multiply(W[:, np.newaxis], A[condi]), F_regu])
+                np.vstack([weighted_A, F_regu])
             )  # stack ax and regu, and remove rows with only 0
             if verbose:
                 print("Is F convex?", is_convex(F.toarray()))
-            D = np.hstack([np.multiply(W, v[condi]), D_regu])  # stack ax and regu, and remove rows with only
+            D = np.hstack([weighted_v, D_regu])  # stack ax and regu, and remove rows with only
+            del weighted_A, weighted_v, condi, W
         if isinstance(ini, list):  # if rolling mean
             x0 = ini[v_pos - 2]
         elif ini.shape[0] == 2:  # if only the average of the entire time series
@@ -533,18 +537,21 @@ def inversion_one_component(
             X = sp.linalg.lsmr(A_l, np.concatenate([linear_operator.Weight * v, D_regu]), x0=x0)[0]
 
     elif solver == "LS":  # 136 ms ± 6.48 ms per loop (mean ± std. dev. of 7 runs, 10 loops each) #time consuming
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype("float32")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype("float32")
+        F = np.vstack([weighted_A, F_regu]).astype("float32")
+        D = np.hstack([weighted_v, D_regu]).astype("float32")
+        del weighted_A, weighted_v, condi, W
         X = np.linalg.lstsq(F, D, rcond=None)[0]
 
     elif solver == "L1":  # solving using L1-norm, time consuming !
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype("float32")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype("float32")
+        F = np.vstack([weighted_A, F_regu]).astype("float32")
+        D = np.hstack([weighted_v, D_regu]).astype("float32")
+        del weighted_A, weighted_v, condi, W
         X = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1]))
 
     elif solver == "LSQR":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype("float32")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype("float32")
+        F = np.vstack([weighted_A, F_regu]).astype("float32")
+        D = np.hstack([weighted_v, D_regu]).astype("float32")
+        del weighted_A, weighted_v, condi, W
         F = sp.csc_matrix(F)
         X, istop, itn, r1norm = sp.linalg.lsqr(F, D)[:4]
 
