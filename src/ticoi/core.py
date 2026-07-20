@@ -855,17 +855,21 @@ def interpolation_to_data(
     ##  Reconstruction of COMMON REF TIME SERIES, e.g. cumulative displacement time series
     dataf = reconstruct_common_ref(result)  # Build cumulative displacement time series
     start_date = dataf["Ref_date"][0]  # First date at the considered pixel
-    x = np.array(
-        (dataf["Second_date"] - np.datetime64(start_date)).dt.days
-    )  # Number of days according to the start_date
+    x = (
+        dataf["Second_date"].to_numpy() - np.datetime64(start_date)
+    ).astype("timedelta64[D]").astype(np.int64)  # Number of days according to the start_date
 
     # Interpolation must be caried out in between the min and max date of the original data
     if data["date1"].min() < result["date2"].min() or data["date2"].max() > result["date2"].max():
         data = data[(data["date1"] > result["date2"].min()) & (data["date2"] < result["date2"].max())]
 
     # Ground truth first and second dates
-    x_gt_date1 = np.array((data["date1"] - start_date).dt.days)
-    x_gt_date2 = np.array((data["date2"] - start_date).dt.days)
+    x_gt_date1 = (
+        data["date1"].to_numpy() - np.datetime64(start_date)
+    ).astype("timedelta64[D]").astype(np.int64)
+    x_gt_date2 = (
+        data["date2"].to_numpy() - np.datetime64(start_date)
+    ).astype("timedelta64[D]").astype(np.int64)
 
     ##  Interpolate the displacements and convert to velocities
     # Compute the functions used to interpolate

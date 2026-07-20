@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ticoi.core import interpolation_core
+from ticoi.core import interpolation_core, interpolation_to_data
 from ticoi.interpolation_functions import reconstruct_common_ref
 
 
@@ -124,3 +124,34 @@ def test_interpolation_quality_columns_and_padding_contract():
     # Existing redundancy-grid semantics can extend beyond the requested end.
     assert actual["date2"].iloc[-1] == pd.Timestamp("2020-03-24")
     assert actual[["vx", "vy"]].iloc[0].isna().all()
+
+
+def test_interpolation_to_data_preserves_day_floor_contract():
+    dates = pd.date_range("2020-01-01", periods=7, freq="D")
+    result = pd.DataFrame(
+        {
+            "date1": dates[:-1],
+            "date2": dates[1:],
+            "result_dx": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "result_dy": [2.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+        }
+    )
+    data = pd.DataFrame(
+        {
+            "date1": pd.to_datetime(["2020-01-02 12:00", "2020-01-03 23:00"]),
+            "date2": pd.to_datetime(["2020-01-03 12:00", "2020-01-05 01:00"]),
+            "temporal_baseline": [1, 2],
+        }
+    )
+
+    actual = interpolation_to_data(result, data, option_interpol="nearest", unit=1)
+
+    expected = pd.DataFrame(
+        {
+            "date1": pd.to_datetime(["2020-01-02", "2020-01-03"]),
+            "date2": pd.to_datetime(["2020-01-03", "2020-01-05"]),
+            "vx": [2.0, 3.5],
+            "vy": [4.0, 7.0],
+        }
+    )
+    pd.testing.assert_frame_equal(actual, expected, check_exact=True)
