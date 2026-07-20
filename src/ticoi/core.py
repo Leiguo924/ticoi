@@ -681,9 +681,9 @@ def interpolation_core(
     else:
         start_date = pd.to_datetime(first_date_interpol)
 
-    x = np.array(
-        (dataf["Second_date"] - np.datetime64(start_date)).dt.days
-    )  # Number of days according to the start_date
+    x = (
+        dataf["Second_date"].to_numpy() - np.datetime64(start_date)
+    ).astype("timedelta64[D]").astype(np.int64)  # Number of days according to the start_date
     if len(x) <= 1 or (
         np.isin("spline", option_interpol) and len(x) <= 3
     ):  # It is not possible to interpolate, because too few estimation
