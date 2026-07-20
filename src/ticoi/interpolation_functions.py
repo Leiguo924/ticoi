@@ -50,16 +50,14 @@ def reconstruct_common_ref(
         )
 
     # Common Reference
-    data = pd.DataFrame(
-        {
-            "Ref_date": result["date1"][0],
-            "Second_date": result["date2"],
-        }
-    )
-
+    data_columns = {
+        "Ref_date": result["date1"][0],
+        "Second_date": result["date2"],
+    }
     for var in result.columns.difference(["date1", "date2"]):
         if var in ["result_dx", "result_dy", "xcount_x", "xcount_y", "error_x", "error_y", "xcount_z"]:
-            data[var] = result[var].values.cumsum()
+            data_columns[var] = result[var].values.cumsum()
+    data = pd.DataFrame(data_columns)
     data = data.rename(columns={"result_dx": "dx", "result_dy": "dy"})
 
     if second_date_list is not None:
