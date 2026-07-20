@@ -1079,7 +1079,9 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
         # A processing block keeps its complete temporal axis. Estimate one
         # spatial tile with every variable, rather than one temporal chunk of
         # vx only; the old estimate could undershoot memory by a large factor.
-        tile_bytes = ds.isel(x=slice(0, x_chunks[0]), y=slice(0, y_chunks[0])).nbytes
+        max_x_chunk = max(x_chunks)
+        max_y_chunk = max(y_chunks)
+        tile_bytes = ds.isel(x=slice(0, max_x_chunk), y=slice(0, max_y_chunk)).nbytes
         nchunks_block = max(1, int(block_size * GB // tile_bytes))
 
         if verbose and tile_bytes > block_size * GB:
@@ -1098,7 +1100,8 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
         nblocks = nblocks_x * nblocks_y
         if verbose:
             print(
-                f"[Block process] Divide into {nblocks} blocks\n   blocks size: {x_step * cube.ds.chunks['x'][0]} x {y_step * cube.ds.chunks['y'][0]}"
+                f"[Block process] Divide into {nblocks} blocks\n"
+                f"   maximum block shape: {x_step * max_x_chunk} x {y_step * max_y_chunk}"
             )
 
         for i in range(nblocks_y):

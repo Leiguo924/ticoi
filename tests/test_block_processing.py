@@ -44,6 +44,47 @@ def test_chunk_to_block_counts_all_variables_and_full_time_axis():
     np.testing.assert_array_equal(coverage, 1)
 
 
+def test_chunk_to_block_uses_largest_spatial_chunks_for_budget():
+    shape = (20, 10, 10)
+    chunks = ((20,), (1, 8, 1), (1, 8, 1))
+    variables = {
+        name: (("mid_date", "y", "x"), da.zeros(shape, chunks=chunks, dtype="float32"))
+        for name in ("vx", "vy", "errorx", "errory")
+    }
+    ds = xr.Dataset(
+        variables,
+        coords={"mid_date": np.arange(shape[0]), "y": np.arange(shape[1]), "x": np.arange(shape[2])},
+    )
+    cube = CubeDataClass()
+    cube.ds = ds
+    cube.update_dimension()
+    max_tile_bytes = ds.isel(x=slice(0, 8), y=slice(0, 8)).nbytes
+
+    blocks = chunk_to_block(cube, block_size=max_tile_bytes * 1.01 / 1024**3)
+
+    coverage = np.zeros((cube.ny, cube.nx), dtype=np.uint8)
+    assembled = [None] * (cube.nx * cube.ny)
+    for x_start, x_end, y_start, y_end in blocks:
+        coverage[y_start:y_end, x_start:x_end] += 1
+        assert ds.isel(x=slice(x_start, x_end), y=slice(y_start, y_end)).nbytes <= max_tile_bytes
+        local_results = [
+            x * cube.ny + y
+            for x in range(x_start, x_end)
+            for y in range(y_start, y_end)
+        ]
+        _assign_block_results(
+            assembled,
+            local_results,
+            cube.ny,
+            x_start,
+            y_start,
+            x_end - x_start,
+            y_end - y_start,
+        )
+    np.testing.assert_array_equal(coverage, 1)
+    assert assembled == list(range(cube.nx * cube.ny))
+
+
 def test_chunk_to_block_keeps_small_cube_whole():
     cube = _chunked_cube()
     assert chunk_to_block(cube, block_size=1) == [[0, cube.nx, 0, cube.ny]]
