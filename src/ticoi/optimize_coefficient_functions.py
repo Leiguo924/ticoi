@@ -10,6 +10,14 @@ from ticoi.core import _assign_block_results, chunk_to_block, load_block
 from ticoi.utils import optimize_coef
 
 
+def _stable_ground_coordinates(flag):
+    """Return stable coordinates in the original x-major, y-minor order."""
+    stable_x, stable_y = np.nonzero(flag["flag"].transpose("x", "y").values == 0)
+    x_values = flag["x"].values
+    y_values = flag["y"].values
+    return list(zip(x_values[stable_x], y_values[stable_y]))
+
+
 async def process_block(
     cube,
     block,
@@ -30,16 +38,7 @@ async def process_block(
     """Optimize the coef on a given block"""
 
     if optimization_method == "stable_ground":  # We only compute stable ground pixels
-        xy_values = list(
-            filter(
-                bool,
-                [
-                    (x, y) if flag.sel(x=x, y=y)["flag"].values == 0 else False
-                    for x in flag["x"].values
-                    for y in flag["y"].values
-                ],
-            )
-        )
+        xy_values = _stable_ground_coordinates(flag)
     else:
         xy_values = list(itertools.product(cube.ds["x"].values, cube.ds["y"].values))
 

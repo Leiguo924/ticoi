@@ -4,6 +4,7 @@ import xarray as xr
 
 from ticoi.core import _assign_block_results, chunk_to_block
 from ticoi.cube_data_classxr import CubeDataClass
+from ticoi.optimize_coefficient_functions import _stable_ground_coordinates
 
 
 def _chunked_cube():
@@ -60,3 +61,23 @@ def test_assign_block_results_matches_pixel_loop_exactly():
     )
 
     assert all(got is reference for got, reference in zip(actual, expected))
+
+
+def test_stable_ground_coordinates_preserve_sel_order_for_both_dim_orders():
+    x = np.array([30.0, 10.0, -5.0])
+    y = np.array([8.0, 2.0, -4.0, -9.0])
+    values_yx = np.array(
+        [[0, 1, 0], [2, 0, 1], [0, 0, 2], [1, 0, 0]], dtype=np.int8
+    )
+    for dims, values in ((('y', 'x'), values_yx), (('x', 'y'), values_yx.T)):
+        flag = xr.Dataset({"flag": (dims, values)}, coords={"x": x, "y": y})
+        expected = [
+            (xv, yv)
+            for xv in flag["x"].values
+            for yv in flag["y"].values
+            if flag.sel(x=xv, y=yv)["flag"].values == 0
+        ]
+
+        actual = _stable_ground_coordinates(flag)
+
+        assert actual == expected
