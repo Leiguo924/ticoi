@@ -785,6 +785,7 @@ def interpolation_core(
             )
     dataf_lp = pd.DataFrame(dataf_lp_columns)
     del x_regu, First_date, Second_date, vx, vy
+    output_frames = [dataf_lp]
 
     # Fill with nan values if the first date of the cube which will be interpolated is lower than the first date interpolated for this pixel
     if first_date_interpol is not None and dataf_lp["date1"].iloc[0] > pd.Timestamp(first_date_interpol):
@@ -805,7 +806,7 @@ def interpolation_core(
                 nul_columns["error_x"] = np.full(len(first_date), np.nan)
                 nul_columns["error_y"] = np.full(len(first_date), np.nan)
         nul_df = pd.DataFrame(nul_columns)
-        dataf_lp = pd.concat([nul_df, dataf_lp], ignore_index=True)
+        output_frames.insert(0, nul_df)
 
     # Fill with nan values if the last date of the cube which will be interpolated is higher than the last date interpolated for this pixel
     if last_date_interpol is not None and dataf_lp["date2"].iloc[-1] < pd.Timestamp(last_date_interpol):
@@ -822,7 +823,10 @@ def interpolation_core(
                 "vy": np.full(len(first_date), np.nan),
             }
         )
-        dataf_lp = pd.concat([dataf_lp, nul_df], ignore_index=True)
+        output_frames.append(nul_df)
+
+    if len(output_frames) > 1:
+        dataf_lp = pd.concat(output_frames, ignore_index=True)
 
     # print(dataf_lp.shape)
     # if dataf_lp.shape[0]!= 567:
