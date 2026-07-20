@@ -689,54 +689,59 @@ def dask_filt_warpper(
     :return:
     """
 
+    def map_or_apply(array, func, **kwargs):
+        if isinstance(array, da.Array):
+            return array.map_blocks(func, dtype=array.dtype, **kwargs)
+        return func(array, **kwargs)
+
     if (
         filt_method == "median_angle"
     ):  # delete observations according to a threshold in angle between observations and median vector
         obs_arr = da_vx.data + 1j * da_vy.data
-        inlier_mask = obs_arr.map_blocks(median_angle_filt, angle_thres=angle_thres, axis=axis, dtype=obs_arr.dtype)
+        inlier_mask = map_or_apply(obs_arr, median_angle_filt, angle_thres=angle_thres, axis=axis)
 
     elif filt_method == "vvc_angle":  # combination between z_score and median_angle
         obs_arr = da_vx.data + 1j * da_vy.data
-        inlier_mask = obs_arr.map_blocks(
-            NVVC_angle_filt, vvc_thres=vvc_thres, angle_thres=angle_thres, axis=axis, dtype=obs_arr.dtype
+        inlier_mask = map_or_apply(
+            obs_arr, NVVC_angle_filt, vvc_thres=vvc_thres, angle_thres=angle_thres, axis=axis
         )
 
     elif filt_method == "vvc_angle_mzscore":  # combination between z_score and median_angle
         obs_arr = da_vx.data + 1j * da_vy.data
-        inlier_mask = obs_arr.map_blocks(
+        inlier_mask = map_or_apply(
+            obs_arr,
             NVVC_angle_mzscore_filt,
             vvc_thres=vvc_thres,
             angle_thres=angle_thres,
             mz_thres=mz_thres,
             axis=axis,
-            dtype=obs_arr.dtype,
         )
 
     elif filt_method == "z_score":  # threshold according to the zscore
-        inlier_mask_vx = da_vx.data.map_blocks(z_score_filt, z_thres=z_thres, axis=axis, dtype=da_vx.dtype)
-        inlier_mask_vy = da_vy.data.map_blocks(z_score_filt, z_thres=z_thres, axis=axis, dtype=da_vy.dtype)
+        inlier_mask_vx = map_or_apply(da_vx.data, z_score_filt, z_thres=z_thres, axis=axis)
+        inlier_mask_vy = map_or_apply(da_vy.data, z_score_filt, z_thres=z_thres, axis=axis)
         inlier_mask = np.logical_and(inlier_mask_vx, inlier_mask_vy)
 
     elif filt_method == "mz_score":  # threshold according to the zscore
-        inlier_mask_vx = da_vx.data.map_blocks(mz_score_filt, mz_thres=mz_thres, axis=axis, dtype=da_vx.dtype)
-        inlier_mask_vy = da_vy.data.map_blocks(mz_score_filt, mz_thres=mz_thres, axis=axis, dtype=da_vy.dtype)
+        inlier_mask_vx = map_or_apply(da_vx.data, mz_score_filt, mz_thres=mz_thres, axis=axis)
+        inlier_mask_vy = map_or_apply(da_vy.data, mz_score_filt, mz_thres=mz_thres, axis=axis)
         inlier_mask = np.logical_and(inlier_mask_vx, inlier_mask_vy)
 
     elif filt_method == "magnitude":  # delete observations according to a threshold in magnitude
         obs_arr = np.hypot(da_vx.data, da_vy.data)
-        inlier_mask = obs_arr.map_blocks(lambda x: x < magnitude_thres, dtype=obs_arr.dtype)
+        inlier_mask = map_or_apply(obs_arr, lambda x: x < magnitude_thres)
 
     elif (
         filt_method == "median_magnitude"
     ):  # the threshold in magnitude is computed relatively to the median of the data
         obs_arr = da_vx.data + 1j * da_vy.data
-        inlier_mask = obs_arr.map_blocks(
-            median_magnitude_filt, median_magnitude_thres=median_magnitude_thres, axis=axis, dtype=obs_arr.dtype
+        inlier_mask = map_or_apply(
+            obs_arr, median_magnitude_filt, median_magnitude_thres=median_magnitude_thres, axis=axis
         )
 
     elif filt_method == "error":  # delete observations according to a threshold in error
-        inlier_mask_vx = da_vx.data.map_blocks(lambda x: x < error_thres, dtype=da_vx.dtype)
-        inlier_mask_vy = da_vy.data.map_blocks(lambda x: x < error_thres, dtype=da_vy.dtype)
+        inlier_mask_vx = map_or_apply(da_vx.data, lambda x: x < error_thres)
+        inlier_mask_vy = map_or_apply(da_vy.data, lambda x: x < error_thres)
         inlier_mask = np.logical_and(inlier_mask_vx, inlier_mask_vy)
 
     elif filt_method == "flow_angle":
@@ -755,4 +760,4 @@ def dask_filt_warpper(
             "Filtering method should be either 'median_angle', 'vvc_angle','vvc_angle_mzscore', 'z_score', 'm_zscore', 'magnitude', 'median_magnitude', 'error', 'flow_angle'."
         )
 
-    return inlier_mask.compute()
+    return inlier_mask.compute() if hasattr(inlier_mask, "compute") else np.asarray(inlier_mask)

@@ -1,8 +1,31 @@
 import dask.array as da
 import numpy as np
+import pytest
 import xarray as xr
 
-from ticoi.filtering_functions import dask_smooth_wrapper, numpy_smooth_wrapper
+from ticoi.filtering_functions import dask_filt_warpper, dask_smooth_wrapper, numpy_smooth_wrapper
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["median_angle", "vvc_angle", "vvc_angle_mzscore", "z_score", "mz_score", "magnitude", "median_magnitude", "error"],
+)
+def test_numpy_filter_matches_single_chunk_dask(method):
+    rng = np.random.default_rng(11)
+    vx = rng.normal(20, 5, (30, 3, 3)).astype("float32")
+    vy = rng.normal(10, 3, (30, 3, 3)).astype("float32")
+    vx[::7, 0, 0] = np.nan
+    vy[::9, 2, 2] = np.nan
+    coords = {"mid_date": np.arange(30), "y": np.arange(3), "x": np.arange(3)}
+    vx_numpy = xr.DataArray(vx, dims=("mid_date", "y", "x"), coords=coords)
+    vy_numpy = xr.DataArray(vy, dims=("mid_date", "y", "x"), coords=coords)
+    vx_dask = vx_numpy.chunk(vx_numpy.sizes)
+    vy_dask = vy_numpy.chunk(vy_numpy.sizes)
+
+    expected = dask_filt_warpper(vx_dask, vy_dask, filt_method=method, axis=0)
+    actual = dask_filt_warpper(vx_numpy, vy_numpy, filt_method=method, axis=0)
+
+    np.testing.assert_array_equal(actual, expected)
 
 
 def test_numpy_smoothing_matches_dask_exactly():
