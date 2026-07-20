@@ -671,9 +671,10 @@ def inversion_two_components(
 
     if show_L_curve:
         R_lcurve = F.dot(X) - D
+        n_observations = D.shape[0] - mu.shape[0]
         residu_norm = [
-            np.linalg.norm(R_lcurve[: np.multiply(Weight[Weight != 0], v[Weight != 0]).shape[0]], ord=2),
-            np.linalg.norm(R_lcurve[np.multiply(Weight[Weight != 0], v[Weight != 0]).shape[0] :] / coef, ord=2),
+            np.linalg.norm(R_lcurve[:n_observations], ord=2),
+            np.linalg.norm(R_lcurve[n_observations:] / coef, ord=2),
         ]
     else:
         residu_norm = None
