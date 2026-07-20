@@ -97,6 +97,18 @@ class Test_inversion:
         actual = construction_a_lf(self.dates, self.dates_range)
         np.testing.assert_array_equal(actual, expected, err_msg="Construction A LP does not give the correct result")
 
+    @pytest.mark.parametrize("regu", ["1", "1accelnotnull"])
+    def test_first_order_regularization_matches_full_matrix_baseline_exactly(self, regu):
+        n_columns = self.A.shape[1]
+        expected = np.diag(np.full(n_columns, -1, dtype="float32"))
+        expected[np.arange(n_columns - 1), np.arange(n_columns - 1) + 1] = 1
+        expected /= np.diff(self.dates_range) / np.timedelta64(1, "D")
+        expected = np.delete(expected, -1, axis=0)
+
+        actual = mu_regularisation(regu, self.A, self.dates_range)
+
+        np.testing.assert_array_equal(actual, expected)
+
     @pytest.mark.parametrize(
         "regu, expected",
         [

@@ -49,18 +49,13 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
     """
 
     # First order Tikhonov regularisation
-    if regu == "1":
-        mu = np.diag(np.full(A.shape[1], -1, dtype="float32"))
-        mu[np.arange(A.shape[1] - 1), np.arange(A.shape[1] - 1) + 1] = 1
+    if regu in ("1", "1accelnotnull"):
+        n_columns = A.shape[1]
+        rows = np.arange(n_columns - 1)
+        mu = np.zeros((n_columns - 1, n_columns), dtype="float32")
+        mu[rows, rows] = -1
+        mu[rows, rows + 1] = 1
         mu /= np.diff(dates_range) / np.timedelta64(1, "D")
-        mu = np.delete(mu, -1, axis=0)
-
-    # First order Tikhonov regularisation, with an apriori on the acceleration
-    elif regu == "1accelnotnull":
-        mu = np.diag(np.full(A.shape[1], -1, dtype="float32"))
-        mu[np.arange(A.shape[1] - 1), np.arange(A.shape[1] - 1) + 1] = 1
-        mu /= np.diff(dates_range) / np.timedelta64(1, "D")
-        mu = np.delete(mu, -1, axis=0)
 
     # Second order Tikhonov regularisation
     elif regu == "2":
