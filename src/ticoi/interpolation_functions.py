@@ -54,8 +54,9 @@ def reconstruct_common_ref(
         "Ref_date": result["date1"][0],
         "Second_date": result["date2"],
     }
-    for var in result.columns.difference(["date1", "date2"]):
-        if var in ["result_dx", "result_dy", "xcount_x", "xcount_y", "error_x", "error_y", "xcount_z"]:
+    cumulative_columns = ("error_x", "error_y", "result_dx", "result_dy", "xcount_x", "xcount_y", "xcount_z")
+    for var in cumulative_columns:
+        if var in result.columns:
             output_var = {"result_dx": "dx", "result_dy": "dy"}.get(var, var)
             data_columns[output_var] = result[var].values.cumsum()
     data = pd.DataFrame(data_columns)
