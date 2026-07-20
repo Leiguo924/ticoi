@@ -33,6 +33,39 @@ def test_unique_valid_dates_loads_each_lazy_array_once():
     expected = np.arange("2020-01-01", "2020-01-05", dtype="datetime64[D]").astype("datetime64[ns]")
     np.testing.assert_array_equal(actual, expected)
     assert calls == ["date1", "date2"]
+
+
+def test_load_pixel_materializes_lazy_variables_in_one_compute(monkeypatch):
+    cube = CubeDataClass()
+    n = 4
+    dates = np.arange("2020-01-01", "2020-01-05", dtype="datetime64[D]")
+    shape = (n, 1, 1)
+    cube.ds = xr.Dataset(
+        {
+            "date1": ("mid_date", da.from_array(dates, chunks=n)),
+            "date2": ("mid_date", da.from_array(dates + 1, chunks=n)),
+            "vx": (("mid_date", "y", "x"), da.ones(shape, chunks=shape)),
+            "vy": (("mid_date", "y", "x"), da.ones(shape, chunks=shape)),
+            "errorx": (("mid_date", "y", "x"), da.ones(shape, chunks=shape)),
+            "errory": (("mid_date", "y", "x"), da.ones(shape, chunks=shape)),
+            "temporal_baseline": ("mid_date", da.ones(n, chunks=n)),
+        },
+        coords={"mid_date": dates, "x": [0], "y": [0]},
+        attrs={"proj4": "EPSG:3413"},
+    )
+    calls = 0
+    original = xr.Dataset.compute
+
+    def counted_compute(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(xr.Dataset, "compute", counted_compute)
+    data, _, _ = cube.load_pixel(0, 0, proj="EPSG:3413")
+
+    np.testing.assert_array_equal(data[0], np.column_stack((dates, dates + 1)))
+    assert calls == 1
 from ticoi.example import get_path
 
 

@@ -986,6 +986,13 @@ class CubeDataClass:
             else:
                 data = self.ds.interp(x=i, y=j, method=interp)[var_to_keep].dropna(dim="mid_date")
 
+        # Load the selected time series as one Dask graph.  Calling dropna and
+        # then accessing dates/numeric variables separately otherwise triggers
+        # several scheduler round-trips for every pixel (and may evaluate the
+        # same lazy chunks repeatedly when the parent cube was not persisted).
+        if any(isinstance(var.data, da.Array) for var in data.data_vars.values()):
+            data = data.compute()
+
         data = data.dropna(dim="mid_date")  # drop nan values
 
         if flag is not None:
