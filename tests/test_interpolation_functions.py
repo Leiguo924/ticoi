@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from ticoi.core import interpolation_core
 from ticoi.interpolation_functions import reconstruct_common_ref
 
 
@@ -87,3 +88,39 @@ def test_reconstruct_common_ref_empty_result_unchanged():
     expected = _baseline_reconstruct_common_ref(result)
     actual = reconstruct_common_ref(result)
     pd.testing.assert_frame_equal(actual, expected, check_exact=True)
+
+
+def test_interpolation_quality_columns_and_padding_contract():
+    n = 12
+    dates = pd.date_range("2020-01-01", periods=n + 1, freq="5D")
+    result = pd.DataFrame(
+        {
+            "date1": dates[:-1], "date2": dates[1:],
+            "result_dx": np.linspace(0.1, 1.2, n),
+            "result_dy": np.linspace(-0.2, 0.9, n),
+            "xcount_x": np.linspace(1, 4, n),
+            "xcount_y": np.linspace(2, 5, n),
+            "error_x": np.linspace(0.01, 0.1, n),
+            "error_y": np.linspace(0.02, 0.2, n),
+            "sigma0": np.linspace(0.3, 0.6, n),
+        }
+    )
+
+    actual = interpolation_core(
+        result,
+        interval_output=20,
+        redundancy=5,
+        option_interpol="spline",
+        result_quality=["X_contribution", "Error_propagation"],
+        first_date_interpol=np.datetime64("2019-12-20"),
+        last_date_interpol=np.datetime64("2020-03-20"),
+    )
+
+    assert actual.columns.tolist() == [
+        "date1", "date2", "vx", "vy", "xcount_x", "xcount_y",
+        "error_x", "error_y", "sigma0",
+    ]
+    assert actual["date1"].iloc[0] == pd.Timestamp("2019-12-20")
+    # Existing redundancy-grid semantics can extend beyond the requested end.
+    assert actual["date2"].iloc[-1] == pd.Timestamp("2020-03-24")
+    assert actual[["vx", "vy"]].iloc[0].isna().all()

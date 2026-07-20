@@ -772,15 +772,18 @@ def interpolation_core(
     )  # Equivalent to [start_date + pd.Timedelta(x_regu[i], 'D') for i in range(len(x_regu) - step)]
     Second_date = start_date + pd.to_timedelta(x_shifted, unit="D")
 
-    dataf_lp = pd.DataFrame({"date1": First_date, "date2": Second_date, "vx": vx, "vy": vy})
+    dataf_lp_columns = {"date1": First_date, "date2": Second_date, "vx": vx, "vy": vy}
     if result_quality is not None:
         if "X_contribution" in result_quality:
-            dataf_lp["xcount_x"] = xcount_x
-            dataf_lp["xcount_y"] = xcount_y
+            dataf_lp_columns["xcount_x"] = xcount_x
+            dataf_lp_columns["xcount_y"] = xcount_y
         if "Error_propagation" in result_quality:
-            dataf_lp["error_x"] = error_x * unit / interval_output
-            dataf_lp["error_y"] = error_y * unit / interval_output
-            dataf_lp["sigma0"] = np.concatenate([result["sigma0"][:4], np.full(dataf_lp.shape[0] - 4, np.nan)])
+            dataf_lp_columns["error_x"] = error_x * unit / interval_output
+            dataf_lp_columns["error_y"] = error_y * unit / interval_output
+            dataf_lp_columns["sigma0"] = np.concatenate(
+                [result["sigma0"][:4], np.full(len(First_date) - 4, np.nan)]
+            )
+    dataf_lp = pd.DataFrame(dataf_lp_columns)
     del x_regu, First_date, Second_date, vx, vy
 
     # Fill with nan values if the first date of the cube which will be interpolated is lower than the first date interpolated for this pixel
@@ -788,21 +791,20 @@ def interpolation_core(
         first_date = np.arange(first_date_interpol, dataf_lp["date1"].iloc[0], np.timedelta64(redundancy, "D"))
         # dataf_lp = full_with_nan(dataf_lp, first_date=first_date,
         #                          second_date=first_date + np.timedelta64(interval_output, 'D'))
-        nul_df = pd.DataFrame(
-            {
-                "date1": first_date,
-                "date2": first_date + np.timedelta64(interval_output, "D"),
-                "vx": np.full(len(first_date), np.nan),
-                "vy": np.full(len(first_date), np.nan),
-            }
-        )
+        nul_columns = {
+            "date1": first_date,
+            "date2": first_date + np.timedelta64(interval_output, "D"),
+            "vx": np.full(len(first_date), np.nan),
+            "vy": np.full(len(first_date), np.nan),
+        }
         if result_quality is not None:
             if "X_contribution" in result_quality:
-                nul_df["xcount_x"] = np.full(len(first_date), np.nan)
-                nul_df["xcount_y"] = np.full(len(first_date), np.nan)
+                nul_columns["xcount_x"] = np.full(len(first_date), np.nan)
+                nul_columns["xcount_y"] = np.full(len(first_date), np.nan)
             if "Error_propagation" in result_quality:
-                nul_df["error_x"] = np.full(len(first_date), np.nan)
-                nul_df["error_y"] = np.full(len(first_date), np.nan)
+                nul_columns["error_x"] = np.full(len(first_date), np.nan)
+                nul_columns["error_y"] = np.full(len(first_date), np.nan)
+        nul_df = pd.DataFrame(nul_columns)
         dataf_lp = pd.concat([nul_df, dataf_lp], ignore_index=True)
 
     # Fill with nan values if the last date of the cube which will be interpolated is higher than the last date interpolated for this pixel
