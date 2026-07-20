@@ -1,10 +1,12 @@
 import itertools
+import time
 
 import dask.array as da
 import numpy as np
 import xarray as xr
 
-from ticoi.core import _assign_block_results, chunk_to_block
+import ticoi.core as core
+from ticoi.core import _assign_block_results, chunk_to_block, process_blocks_refine
 from ticoi.cube_data_classxr import CubeDataClass
 from ticoi.optimize_coefficient_functions import (
     _optimization_coordinates,
@@ -143,3 +145,60 @@ def test_nonstable_optimization_coordinates_are_lazy_and_ordered():
     assert not isinstance(actual, list)
     assert total == cube.nx * cube.ny
     assert list(actual) == expected
+
+
+def test_block_prefetch_can_be_disabled_without_changing_results(monkeypatch):
+    events = []
+
+    class FakeBlock:
+        live = 0
+        max_live = 0
+
+        def __init__(self, x_start):
+            type(self).live += 1
+            type(self).max_live = max(type(self).max_live, type(self).live)
+            self.nx = self.ny = 1
+            self.ds = xr.Dataset(coords={"x": [x_start], "y": [0]})
+            self.x_start = x_start
+
+        def __del__(self):
+            type(self).live -= 1
+
+        def load_pixel(self, *args, **kwargs):
+            if self.x_start == 0:
+                time.sleep(0.1)
+                events.append("processed_0")
+            return self.x_start
+
+    def fake_load_block(cube, x_start, x_end, y_start, y_end, flag=None):
+        if x_start == 1:
+            events.append("loaded_1")
+        return FakeBlock(x_start), None, 0.0
+
+    class InlineParallel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __call__(self, tasks):
+            return [func(*args, **kwargs) for func, args, kwargs in tasks]
+
+    monkeypatch.setattr(core, "chunk_to_block", lambda *args, **kwargs: [[0, 1, 0, 1], [1, 2, 0, 1]])
+    monkeypatch.setattr(core, "load_block", fake_load_block)
+    monkeypatch.setattr(core, "Parallel", InlineParallel)
+    cube = CubeDataClass()
+    cube.nx, cube.ny = 2, 1
+    kwargs = {
+        "proj": "EPSG:3413",
+        "interpolation_load_pixel": "nearest",
+        "solver": "LSMR",
+        "regu": "1",
+        "visual": False,
+    }
+
+    bounded = process_blocks_refine(
+        cube, nb_cpu=1, returned="raw", inversion_kwargs=kwargs, prefetch_blocks=False
+    )
+
+    assert bounded == [0, 1]
+    assert events.index("loaded_1") > events.index("processed_0")
+    assert FakeBlock.max_live == 1

@@ -1169,6 +1169,7 @@ def process_blocks_refine(
     preData_kwargs: dict = None,
     inversion_kwargs: dict | None = None,
     verbose: bool = False,
+    prefetch_blocks: bool = True,
 ):
     """
     Separate the cube in several blocks computed synchronously one after the other by loading one block while the other is computed (with
@@ -1181,6 +1182,9 @@ def process_blocks_refine(
     :param preData_kwargs: [dict] [default is None] --- Pre-processing parameters (see cube_data_classxr.filter_cube)
     :param inversion_kwargs: [dict] [default is None] --- Inversion (and interpolation) parameters (see core.process)
     :param verbose: [bool] [default is False] --- Print information along the way
+    :param prefetch_blocks: [bool] [default is True] --- Load the next block while
+        processing the current one. Disable for very large cubes to keep only
+        one persisted block resident at a time.
 
     :return: [pd dataframe] Resulting estimated time series after inversion (and interpolation)
     """
@@ -1251,15 +1255,22 @@ def process_blocks_refine(
         for n in range(len(blocks)):
             print(f"[Block process] Processing block {n + 1}/{len(blocks)}")
 
-            # Load the first block and start the loop
-            if n == 0:
-                x_start, x_end, y_start, y_end = blocks[0]
-                future = loop.run_in_executor(None, load_block, cube, x_start, x_end, y_start, y_end, flag)
-
-            block, block_flag, duration = await future
+            if not prefetch_blocks:
+                # Strict single-block mode: synchronous loading guarantees no
+                # next block can become resident before this iteration ends.
+                x_start, x_end, y_start, y_end = blocks[n]
+                block, block_flag, duration = load_block(
+                    cube, x_start, x_end, y_start, y_end, flag
+                )
+            else:
+                # Load the first block and start the overlapped pipeline.
+                if n == 0:
+                    x_start, x_end, y_start, y_end = blocks[0]
+                    future = loop.run_in_executor(None, load_block, cube, x_start, x_end, y_start, y_end, flag)
+                block, block_flag, duration = await future
             print(f"Block {n + 1} loaded in {duration:.2f} s")
 
-            if n < len(blocks) - 1:
+            if prefetch_blocks and n < len(blocks) - 1:
                 # Load the next block while processing the current block
                 x_start, x_end, y_start, y_end = blocks[n + 1]
                 future = loop.run_in_executor(None, load_block, cube, x_start, x_end, y_start, y_end, flag)
@@ -1278,6 +1289,7 @@ def process_blocks_refine(
             )
 
             del block_result, block
+
 
         if isinstance(returned, list) and len(returned) > 1:
             dataf_list = {returned[r]: [dataf_list[i][r] for i in range(len(dataf_list))] for r in range(len(returned))}
