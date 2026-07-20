@@ -109,6 +109,30 @@ class Test_inversion:
 
         np.testing.assert_array_equal(actual, expected)
 
+    @pytest.mark.parametrize("n_ini", [2, 4])
+    def test_direction_regularization_matches_loop_baseline_exactly(self, n_ini):
+        n_columns = self.A.shape[1]
+        x = np.linspace(1.0, 3.0, n_columns)
+        y = np.linspace(2.0, 4.0, n_columns)
+        ini = [x, y] if n_ini == 2 else [x, y, x + 1, y + 2]
+        delta = [
+            (self.dates_range[k + 1] - self.dates_range[k]) / np.timedelta64(1, "D")
+            for k in range(len(self.dates_range) - 1)
+        ]
+        expected = np.zeros((n_columns, 2 * n_columns), dtype="float64")
+        if n_ini == 2:
+            vv = np.array(ini[0]) ** 2 + np.array(ini[1]) ** 2
+        else:
+            vv = np.sqrt(ini[0] ** 2 + ini[1] ** 2) / 365 * np.sqrt(ini[2] ** 2 + ini[3] ** 2) / delta
+        for k in range(n_columns):
+            scale = 1 if n_ini == 2 else 365
+            expected[k, k] = ini[0][k] / scale / int(delta[k]) / vv[k]
+            expected[k, k + n_columns] = ini[1][k] / scale / int(delta[k]) / vv[k]
+
+        actual = mu_regularisation("directionxy", self.A, self.dates_range, ini=ini)
+
+        np.testing.assert_array_equal(actual, expected)
+
     @pytest.mark.parametrize(
         "regu, expected",
         [

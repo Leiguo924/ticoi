@@ -70,23 +70,19 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
     # Regularisation on the direction when vx and vy are inverted together
     elif regu == "directionxy":
         mu = np.zeros((A.shape[1], 2 * A.shape[1]), dtype="float64")
-        delta = [(dates_range[k + 1] - dates_range[k]) / np.timedelta64(1, "D") for k in range(len(dates_range) - 1)]
+        delta = np.diff(dates_range) / np.timedelta64(1, "D")
+        delta_int = delta.astype(int)
+        rows = np.arange(len(dates_range) - 1)
 
         if len(ini) == 2:
             vv = np.array(ini[0]) ** 2 + np.array(ini[1]) ** 2
-            for k in range(
-                len(dates_range) - 1
-            ):  # Force estimated vector to be colinear to the averaged vector : vector product equal to 1
-                mu[k, k] = ini[0][k] / int(delta[k]) / vv[k]  # vx * meanvx
-                mu[k, k + len(dates_range) - 1] = ini[1][k] / int(delta[k]) / vv[k]  # vy * meanvy
+            mu[rows, rows] = np.asarray(ini[0]) / delta_int / vv
+            mu[rows, rows + len(dates_range) - 1] = np.asarray(ini[1]) / delta_int / vv
 
         elif len(ini) == 4:
             vv = np.sqrt(ini[0] ** 2 + ini[1] ** 2) / 365 * np.sqrt(ini[2] ** 2 + ini[3] ** 2) / delta
-            for k in range(
-                len(dates_range) - 1
-            ):  # Force estimated vector to be colinear to the averaged vector : vector product equal to 1
-                mu[k, k] = ini[0][k] / 365 / int(delta[k]) / vv[k]  # vx * meanvx
-                mu[k, k + len(dates_range) - 1] = ini[1][k] / 365 / int(delta[k]) / vv[k]  # vy * meanvy
+            mu[rows, rows] = np.asarray(ini[0]) / 365 / delta_int / vv
+            mu[rows, rows + len(dates_range) - 1] = np.asarray(ini[1]) / 365 / delta_int / vv
 
     else:
         raise ValueError("Enter '1', '2','1accelnotnull', 'directionxy")
