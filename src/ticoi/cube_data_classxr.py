@@ -17,7 +17,7 @@ import time
 import warnings
 from tqdm import tqdm
 import gc
-from functools import reduce
+from functools import lru_cache, reduce
 from typing import Optional
 
 import dask.array as da
@@ -47,6 +47,21 @@ MethodInterp = Literal["linear", "nearest", "zero", "slinear", "quadratic", "cub
 ReturnAs = Literal["dataframe", "cube"]
 Regu = Literal["1accelnotnull", "1", "2", "directionxy"]
 Solver = Literal["LSMR", "LSMR_ini", "LSQR", "LS", "L1"]
+
+
+@lru_cache(maxsize=64)
+def _cached_crs(crs: str) -> CRS:
+    return CRS(crs)
+
+
+@lru_cache(maxsize=64)
+def _cached_proj(crs: str) -> Proj:
+    return Proj(crs)
+
+
+@lru_cache(maxsize=64)
+def _cached_transformer(source: str, target: str) -> Transformer:
+    return Transformer.from_crs(_cached_crs(source), _cached_crs(target))
 
 # %% ======================================================================== #
 #                              CUBE DATA CLASS                                #
@@ -887,13 +902,14 @@ class CubeDataClass:
 
         # Convert coordinates if needed
         if proj == "EPSG:4326":
-            myproj = Proj(self.ds.proj4)
+            myproj = _cached_proj(str(self.ds.proj4))
             i, j = myproj(i, j)
             if verbose:
                 print(f"[Data loading] Converted to projection {self.ds.proj4}: {i, j}")
         else:
-            if CRS(self.ds.proj4) != CRS(proj):
-                transformer = Transformer.from_crs(CRS(proj), CRS(self.ds.proj4))
+            cube_proj = str(self.ds.proj4)
+            if _cached_crs(cube_proj) != _cached_crs(proj):
+                transformer = _cached_transformer(proj, cube_proj)
                 i, j = transformer.transform(i, j)
                 if verbose:
                     print(f"[Data loading] Converted to projection {self.ds.proj4}: {i, j}")
@@ -963,7 +979,7 @@ class CubeDataClass:
             else:
                 raise ValueError("regu must be a dict if assign_flag is True!")
 
-        data_dates = data[["date1", "date2"]].to_array().values.T
+        data_dates = np.column_stack((data["date1"].values, data["date2"].values))
         if data_dates.dtype == "<M8[ns]":  # Convert to days if needed
             data_dates = data_dates.astype("datetime64[D]")
 
@@ -988,8 +1004,14 @@ class CubeDataClass:
         # data_values is composed of vx, vy, errorx, errory, temporal baseline
         if visual:
             if output_format == "np":
-                data_str = data[["sensor", "source"]].to_array().values.T
-                data_values = data.drop_vars(["date1", "date2", "sensor", "source"]).to_array().values.T
+                if isinstance(data["vx"].data, da.Array):
+                    data_str = data[["sensor", "source"]].to_array().values.T
+                    data_values = data.drop_vars(["date1", "date2", "sensor", "source"]).to_array().values.T
+                else:
+                    data_str = np.column_stack((data["sensor"].values, data["source"].values))
+                    data_values = np.column_stack(
+                        tuple(data[var].values for var in ("vx", "vy", "errorx", "errory", "temporal_baseline"))
+                    )
                 data = [data_dates, data_values, data_str]
             elif output_format == "df":
                 data = data.to_pandas()
@@ -998,7 +1020,12 @@ class CubeDataClass:
                     "Please enter np if you want to have as output a numpy array, and df if you want a pandas dataframe"
                 )
         else:
-            data_values = data.drop_vars(["date1", "date2"]).to_array().values.T
+            if isinstance(data["vx"].data, da.Array):
+                data_values = data.drop_vars(["date1", "date2"]).to_array().values.T
+            else:
+                data_values = np.column_stack(
+                    tuple(data[var].values for var in ("vx", "vy", "errorx", "errory", "temporal_baseline"))
+                )
             data = [data_dates, data_values]
 
         if flag is not None:

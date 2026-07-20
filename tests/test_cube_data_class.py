@@ -75,3 +75,10 @@ class Testclass_cube_data_xr:
         assert data[1].shape[1] == 5
         actual = data[1][0, :]
         np.testing.assert_array_almost_equal(actual, expected, decimal=1)
+
+        cube_data_class_instance.ds.load()
+        loaded_data, loaded_mean, loaded_dates_range = cube_data_class_instance.load_pixel(x, y)
+        np.testing.assert_array_equal(loaded_data[0], data[0])
+        np.testing.assert_array_equal(loaded_data[1], data[1])
+        assert loaded_mean == mean
+        assert loaded_dates_range == dates_range
