@@ -63,6 +63,23 @@ def _cached_proj(crs: str) -> Proj:
 def _cached_transformer(source: str, target: str) -> Transformer:
     return Transformer.from_crs(_cached_crs(source), _cached_crs(target))
 
+
+def _unique_valid_dates(date1: xr.DataArray, date2: xr.DataArray) -> np.ndarray:
+    """Load each date array once and return sorted unique non-NaT dates."""
+    date1_values = date1.values
+    date2_values = date2.values
+    return np.sort(
+        np.unique(
+            np.concatenate(
+                (
+                    date1_values[~np.isnan(date1_values)],
+                    date2_values[~np.isnan(date2_values)],
+                ),
+                axis=0,
+            )
+        )
+    )
+
 # %% ======================================================================== #
 #                              CUBE DATA CLASS                                #
 # =========================================================================%% #
@@ -1462,16 +1479,8 @@ class CubeDataClass:
                 print(f"[Data filtering] Delete outlier took {round((time.time() - start), 1)} s")
 
         if "1accelnotnull" in regu or "directionxy" in regu:  # compute velocity smoothed using a spatio-temporal filter
-            date_range = np.sort(
-                np.unique(
-                    np.concatenate(
-                        (
-                            self.ds["date1"].values[~np.isnan(self.ds["date1"].values)],
-                            self.ds["date2"].values[~np.isnan(self.ds["date2"].values)],
-                        ),
-                        axis=0,
-                    )
-                )
+            date_range = _unique_valid_dates(
+                self.ds["date1"], self.ds["date2"]
             )  # dates between which the displacement should be estimated
             if verbose:
                 start = time.time()

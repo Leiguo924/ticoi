@@ -1,12 +1,38 @@
 import os
 
+import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
+from dask import delayed
 
 from ticoi.cube_data_classxr import (
     CubeDataClass,  # Assuming cube_data_class is defined in your_module
+    _unique_valid_dates,
 )
+
+
+def test_unique_valid_dates_loads_each_lazy_array_once():
+    calls = []
+
+    def load_dates(name, values):
+        calls.append(name)
+        return values
+
+    date1_values = np.array(["2020-01-01", "NaT", "2020-01-03"], dtype="datetime64[ns]")
+    date2_values = np.array(["2020-01-02", "2020-01-03", "2020-01-04"], dtype="datetime64[ns]")
+    date1 = xr.DataArray(
+        da.from_delayed(delayed(load_dates)("date1", date1_values), shape=(3,), dtype="datetime64[ns]")
+    )
+    date2 = xr.DataArray(
+        da.from_delayed(delayed(load_dates)("date2", date2_values), shape=(3,), dtype="datetime64[ns]")
+    )
+
+    actual = _unique_valid_dates(date1, date2)
+
+    expected = np.arange("2020-01-01", "2020-01-05", dtype="datetime64[D]").astype("datetime64[ns]")
+    np.testing.assert_array_equal(actual, expected)
+    assert calls == ["date1", "date2"]
 from ticoi.example import get_path
 
 
