@@ -7,6 +7,7 @@ from ticoi.inversion_functions import (
     construction_a_lf,
     construction_dates_range_np,
     inversion_one_component,
+    inversion_two_components,
 )
 
 
@@ -255,3 +256,43 @@ class Test_inversion:
         ]
 
         np.testing.assert_array_equal(actual, expected)
+
+    def test_two_component_sparse_system_matches_dense_baseline_exactly(self, monkeypatch):
+        weight = np.linspace(0.2, 1.0, 2 * self.A.shape[0])
+        weight[::4] = 0
+        mu = np.zeros((self.A.shape[1], 2 * self.A.shape[1]), dtype="float64")
+        rows = np.arange(self.A.shape[1])
+        mu[rows, rows] = 0.25
+        mu[rows, rows + self.A.shape[1]] = 0.75
+        block_a = np.block(
+            [[self.A, np.zeros_like(self.A)], [np.zeros_like(self.A), self.A]]
+        )
+        keep = weight != 0
+        expected_f = sp.csc_matrix(
+            np.vstack([weight[keep, None] * block_a[keep], 3 * mu]).astype("float64")
+        )
+        velocity = np.concatenate([self.data[:, 0], self.data[:, 1]])
+        expected_d = np.hstack([weight[keep] * velocity[keep], np.ones(mu.shape[0]) * 3]).astype("float64")
+
+        def verify_lsmr(actual_f, actual_d, **kwargs):
+            np.testing.assert_array_equal(actual_f.data, expected_f.data)
+            np.testing.assert_array_equal(actual_f.indices, expected_f.indices)
+            np.testing.assert_array_equal(actual_f.indptr, expected_f.indptr)
+            np.testing.assert_array_equal(actual_d, expected_d)
+            return (np.zeros(2 * self.A.shape[1]),)
+
+        monkeypatch.setattr(sp.linalg, "lsmr", verify_lsmr)
+        direction_data = np.column_stack(
+            [np.zeros((len(self.data), 2)), self.data[:, 0], self.data[:, 1]]
+        )
+        inversion_two_components(
+            self.A,
+            self.dates_range,
+            0,
+            direction_data,
+            weight,
+            mu,
+            solver="LSMR",
+            coef=3,
+            show_L_curve=True,
+        )

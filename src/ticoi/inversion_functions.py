@@ -611,32 +611,40 @@ def inversion_two_components(
             print("ill conditioned")
             print("rank A", np.linalg.matrix_rank(A))
 
-    c = np.concatenate([A, np.zeros(A.shape)], axis=0)
-    A = np.concatenate([c, np.concatenate([np.zeros(A.shape), A], axis=0)], axis=1)
-    dates_range = np.concatenate([dates_range, dates_range])
-    del c
+    n_rows, n_columns = A.shape
+    sparse_solver = solver in ("LSMR", "LSMR_ini", "LSQR", "LSQR_ini")
+    if sparse_solver:
+        source_A = sp.csr_matrix(A)
+        block_A = sp.block_diag((source_A, source_A), format="csr")
+    else:
+        block_A = np.zeros((2 * n_rows, 2 * n_columns), dtype=A.dtype)
+        block_A[:n_rows, :n_columns] = A
+        block_A[n_rows:, n_columns:] = A
+    A = block_A
     F_regu = np.multiply(coef, mu)
     # D_regu = np.zeros(mu.shape[0])
     D_regu = np.ones(mu.shape[0]) * coef
 
     v = np.concatenate([data[:, 2].T, data[:, 3].T])  # Concatenate vx and vy observations
+    condi = Weight != 0
+    W = Weight[condi]
+    if sparse_solver:
+        weighted_A = A[condi].multiply(W[:, np.newaxis])
+    else:
+        weighted_A = np.multiply(W[:, np.newaxis], A[condi])
+    weighted_v = np.multiply(W, v[condi])
 
     # del delta, mean
 
     if solver == "LSMR":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype("float64")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype("float64")
-        F = sp.csc_matrix(F)  # column-scaling so that each column have the same euclidean norme (i.e. 1)
+        F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
         # If atol or btol is None, a default value of 1.0e-6 will be used. Ideally, they should be estimates of the relative error in the entries of A and b respectively.
         X = sp.linalg.lsmr(F, D)[0]
 
     elif solver == "LSMR_ini":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), F_regu]).astype(
-            "float64"
-        )  # stack ax and regu, and remove rows with only 0
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), D_regu]).astype(
-            "float64"
-        )  # stack ax and regu, and remove rows with only
+        F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
 
         if type(ini) is not list:
             x0 = np.concatenate(ini)
@@ -646,18 +654,16 @@ def inversion_two_components(
             x0 = ini
         # del ini
 
-        F = sp.csc_matrix(F)
         X = sp.linalg.lsmr(F, D, x0=x0)[0]
 
     elif solver == "LS":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), coef * mu]).astype("float64")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), np.zeros(mu.shape[0])]).astype("float64")
+        F = np.vstack([weighted_A, F_regu]).astype("float64")
+        D = np.hstack([weighted_v, np.zeros(mu.shape[0])]).astype("float64")
         X = np.linalg.lstsq(F, D, rcond=None)[0]
 
     elif solver == "LSQR" or solver == "LSQR_ini":
-        F = np.vstack([np.multiply(Weight[Weight != 0][:, np.newaxis], A[Weight != 0]), coef * mu]).astype("float64")
-        D = np.hstack([np.multiply(Weight[Weight != 0], v[Weight != 0]), np.zeros(mu.shape[0])]).astype("float64")
-        F = sp.csc_matrix(F)  # column-scaling so that each column have the same euclidean norme (i.e. 1)
+        F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
+        D = np.hstack([weighted_v, np.zeros(mu.shape[0])]).astype("float64")
         X, istop, itn, r1norm = sp.linalg.lsqr(F, D)[:4]
 
     else:
