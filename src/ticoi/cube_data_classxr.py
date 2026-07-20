@@ -37,7 +37,7 @@ from pyproj import CRS, Proj, Transformer
 import matplotlib.pyplot as plt
 import s3fs
 
-from ticoi.filtering_functions import dask_filt_warpper, dask_smooth_wrapper
+from ticoi.filtering_functions import dask_filt_warpper, dask_smooth_wrapper, numpy_smooth_wrapper
 from ticoi.inversion_functions import construction_dates_range_np
 from ticoi.mjd2date import mjd2date
 
@@ -1302,12 +1302,12 @@ class CubeDataClass:
         :return obs_filt: [xr dataset | None] --- Filtered dataset
         """
 
-        def loop_rolling(da_arr: xr.Dataset, select_baseline: int | None = 180) -> (np.ndarray, np.ndarray):  # type: ignore
+        def loop_rolling(da_arr: xr.Dataset, baseline_idx: np.ndarray | None = None) -> (np.ndarray, np.ndarray):  # type: ignore
             """
             A function to calculate spatial mean, resample data, and calculate smoothed velocity.
 
             :param da_arr: [xr dataset] --- Original data
-            :param select_baseline: [int] [default is None] --- Threshold over the temporal baselines
+            :param baseline_idx: [np array | None] --- Precomputed observation indices selected from temporal baselines
 
             :return spatial_mean: [np array] --- smoothed velocity
             :return date_out: [np array] --- Observed dates
@@ -1319,21 +1319,34 @@ class CubeDataClass:
 
             if verbose:
                 start = time.time()
-            if select_baseline is not None:  # select data with a temporal baseline lower than a threshold
-                baseline = self.ds["temporal_baseline"].compute()
-                idx = np.where(baseline < select_baseline)
-                while (
-                    len(idx[0]) < 3 * len(date_out) & (select_baseline < 500)
-                ):  # Increase the threshold by 30, if the number of observation is lower than 3 times the number of estimated displacement
-                    select_baseline += 30
-                    idx = np.where(baseline < select_baseline)
-                mid_dates = mid_dates.isel(mid_date=idx[0])
-                da_arr = da_arr.isel(mid_date=idx[0])
+            if baseline_idx is not None:
+                mid_dates = mid_dates.isel(mid_date=baseline_idx)
+                da_arr = da_arr.isel(mid_date=baseline_idx)
 
             # Find the time axis for dask processing
             time_axis = self.ds["vx"].dims.index("mid_date")
             # Apply the selected kernel in time
-            if verbose:
+            array_data = da_arr.data
+            use_numpy = (
+                da_arr.nbytes <= 32 * 1024**2
+                and min(da_arr["x"].size, da_arr["y"].size) <= s_win
+                and (
+                    not isinstance(array_data, da.Array)
+                    or all(len(chunks) == 1 for chunks in array_data.chunks)
+                )
+            )
+            if use_numpy:
+                filtered_in_time = numpy_smooth_wrapper(
+                    np.asarray(array_data),
+                    mid_dates,
+                    t_out=date_out,
+                    smooth_method=smooth_method,
+                    sigma=sigma,
+                    t_win=t_win,
+                    order=order,
+                    axis=time_axis,
+                )
+            elif verbose:
                 with ProgressBar():  # Plot a progress bar
                     filtered_in_time = dask_smooth_wrapper(
                         da_arr.data,
@@ -1373,7 +1386,9 @@ class CubeDataClass:
             else:
                 spatial_mean = filtered_in_time
 
-            return spatial_mean.compute(), np.unique(date_out)
+            if isinstance(spatial_mean, da.Array):
+                spatial_mean = spatial_mean.compute()
+            return spatial_mean, np.unique(date_out)
 
         if np.isnan(self.ds["date1"].values).all():
             print("[Data filtering] Empty sub-cube (masked data ?)")
@@ -1434,11 +1449,22 @@ class CubeDataClass:
             if verbose:
                 start = time.time()
 
+            baseline_idx = None
+            if select_baseline is not None:
+                # This selection is identical for vx and vy. Computing it once is
+                # especially important for lazily loaded, large cubes, where the
+                # temporal-baseline array may otherwise be read from storage twice.
+                baseline = self.ds["temporal_baseline"].compute()
+                baseline_idx = np.where(baseline < select_baseline)[0]
+                while len(baseline_idx) < 3 * (len(date_range) - 1) & (select_baseline < 500):
+                    select_baseline += 30
+                    baseline_idx = np.where(baseline < select_baseline)[0]
+
             # spatio-temporal filter
             vx_filtered, dates_uniq = loop_rolling(
-                self.ds["vx"], select_baseline=select_baseline
+                self.ds["vx"], baseline_idx=baseline_idx
             )  # dates_uniq correspond to the central date of dates_range
-            vy_filtered, dates_uniq = loop_rolling(self.ds["vy"], select_baseline=select_baseline)
+            vy_filtered, dates_uniq = loop_rolling(self.ds["vy"], baseline_idx=baseline_idx)
 
             # We obtain one smoothed value for each unique date in date_range
             obs_filt = xr.Dataset(

@@ -330,6 +330,52 @@ def dask_smooth_wrapper(
     return da_smooth
 
 
+def numpy_smooth_wrapper(
+    array: np.ndarray,
+    dates: xr.DataArray,
+    t_out: np.ndarray,
+    smooth_method: SmoothMethod = "savgol",
+    t_win: int = 90,
+    sigma: int = 3,
+    order: int = 3,
+    axis: int = 2,
+) -> np.ndarray:
+    """Apply the same smoothing kernel without Dask scheduling overhead.
+
+    This is intended for small arrays that are already safe to materialize in
+    memory. Date preparation deliberately mirrors :func:`dask_smooth_wrapper`
+    so the numerical operation and random-number consumption remain unchanged.
+    """
+    t_obs = (dates.data - dates.data.min()).astype("timedelta64[D]").astype("float64")
+    if t_out.dtype == "datetime64[ns]" or t_out.dtype == "<M8[s]":
+        t_out = (t_out - dates.data.min()).astype("timedelta64[D]").astype("int")
+    if t_out.min() < 0:
+        t_obs = t_obs - t_out.min()
+        t_out = t_out - t_out.min()
+    while np.unique(t_obs).size < t_obs.size:
+        t_obs += np.random.uniform(low=0.01, high=0.09, size=t_obs.shape)
+    t_obs.sort()
+    t_interp = np.arange(0, int(max(t_obs.max(), t_out.max()) + 1), 1)
+    filt_func = {
+        "gaussian": gaussian_smooth,
+        "median": median_smooth,
+        "savgol": savgol_smooth,
+        "ICA": ica_denoise,
+        "lowess": lowess_smooth,
+    }[smooth_method]
+    return np.apply_along_axis(
+        filt_func,
+        axis,
+        array,
+        t_obs=t_obs,
+        t_interp=t_interp,
+        t_out=t_out,
+        t_win=t_win,
+        sigma=sigma,
+        order=order,
+    )
+
+
 def df_smooth_wrapper(
     data_array: np.ndarray,
     t_out: np.ndarray,

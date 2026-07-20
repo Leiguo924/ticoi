@@ -1,4 +1,31 @@
-# import numpy as np
+import dask.array as da
+import numpy as np
+import xarray as xr
+
+from ticoi.filtering_functions import dask_smooth_wrapper, numpy_smooth_wrapper
+
+
+def test_numpy_smoothing_matches_dask_exactly():
+    rng = np.random.default_rng(7)
+    values = rng.normal(size=(40, 3, 3)).astype("float32")
+    values[::11, 1, 1] = np.nan
+    dates = np.datetime64("2020-01-01") + np.arange(40) * np.timedelta64(12, "D")
+    # Include duplicate dates to verify identical random-number consumption.
+    dates[10] = dates[9]
+    dates = xr.DataArray(dates, dims="mid_date")
+    t_out = dates.values[:-1] + np.diff(dates.values) // 2
+
+    np.random.seed(1234)
+    expected = dask_smooth_wrapper(
+        da.from_array(values, chunks=values.shape), dates, t_out, t_win=11, order=3, axis=0
+    ).compute()
+    np.random.seed(1234)
+    actual = numpy_smooth_wrapper(values, dates, t_out, t_win=11, order=3, axis=0)
+
+    assert actual.dtype == expected.dtype
+    np.testing.assert_array_equal(actual, expected)
+
+
 # import pytest
 # from ticoi.filtering_functions import numpy_ewma_vectorized,ewma_smooth, gaussian_smooth
 #
