@@ -53,9 +53,9 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
         n_columns = A.shape[1]
         rows = np.arange(n_columns - 1)
         mu = np.zeros((n_columns - 1, n_columns), dtype="float32")
-        mu[rows, rows] = -1
-        mu[rows, rows + 1] = 1
-        mu /= np.diff(dates_range) / np.timedelta64(1, "D")
+        delta = np.diff(dates_range) / np.timedelta64(1, "D")
+        mu[rows, rows] = -1 / delta[rows]
+        mu[rows, rows + 1] = 1 / delta[rows + 1]
 
     # Second order Tikhonov regularisation
     elif regu == "2":
