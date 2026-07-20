@@ -6,7 +6,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from ticoi.core import chunk_to_block, load_block
+from ticoi.core import _assign_block_results, chunk_to_block, load_block
 from ticoi.utils import optimize_coef
 
 
@@ -139,12 +139,10 @@ async def process_blocks_main(
             preData_kwargs=preData_kwargs,
         )
 
-        for i in range(len(block_result)):
-            row = i % block.ny + blocks[n][2]
-            col = np.floor(i / block.ny) + blocks[n][0]
-            idx = int(col * cube.ny + row)
-
-            dataf_list[idx] = block_result[i]
+        _assign_block_results(
+            dataf_list, block_result, cube.ny,
+            blocks[n][0], blocks[n][2], block.nx, block.ny,
+        )
 
         del block_result, block
 

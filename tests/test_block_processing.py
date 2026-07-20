@@ -2,7 +2,7 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 
-from ticoi.core import chunk_to_block
+from ticoi.core import _assign_block_results, chunk_to_block
 from ticoi.cube_data_classxr import CubeDataClass
 
 
@@ -41,3 +41,22 @@ def test_chunk_to_block_counts_all_variables_and_full_time_axis():
 def test_chunk_to_block_keeps_small_cube_whole():
     cube = _chunked_cube()
     assert chunk_to_block(cube, block_size=1) == [[0, cube.nx, 0, cube.ny]]
+
+
+def test_assign_block_results_matches_pixel_loop_exactly():
+    cube_ny = 7
+    block_nx, block_ny = 3, 4
+    x_start, y_start = 2, 1
+    results = [object() for _ in range(block_nx * block_ny)]
+    expected = [None] * (6 * cube_ny)
+    for i, value in enumerate(results):
+        row = i % block_ny + y_start
+        col = int(np.floor(i / block_ny)) + x_start
+        expected[col * cube_ny + row] = value
+
+    actual = [None] * len(expected)
+    _assign_block_results(
+        actual, results, cube_ny, x_start, y_start, block_nx, block_ny
+    )
+
+    assert all(got is reference for got, reference in zip(actual, expected))

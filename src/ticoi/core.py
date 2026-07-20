@@ -1136,6 +1136,16 @@ def load_block(cube: CubeDataClass, x_start: int, x_end: int, y_start: int, y_en
     return block, block_flag, duration
 
 
+def _assign_block_results(dataf_list, block_result, cube_ny, x_start, y_start, block_nx, block_ny):
+    """Place x-major block results into the matching global x-major slices."""
+    for local_col in range(block_nx):
+        source_start = local_col * block_ny
+        target_start = (local_col + x_start) * cube_ny + y_start
+        dataf_list[target_start : target_start + block_ny] = block_result[
+            source_start : source_start + block_ny
+        ]
+
+
 def process_blocks_refine(
     cube: CubeDataClass,
     nb_cpu: int = 8,
@@ -1247,13 +1257,10 @@ def process_blocks_refine(
                 block, returned=returned, nb_cpu=nb_cpu, verbose=verbose
             )  # Process TICOI
 
-            # Transform to list
-            for i in range(len(block_result)):
-                row = i % block.ny + blocks[n][2]
-                col = np.floor(i / block.ny) + blocks[n][0]
-                idx = int(col * cube.ny + row)
-
-                dataf_list[idx] = block_result[i]
+            _assign_block_results(
+                dataf_list, block_result, cube.ny,
+                blocks[n][0], blocks[n][2], block.nx, block.ny,
+            )
 
             del block_result, block
 
