@@ -18,6 +18,13 @@ def _stable_ground_coordinates(flag):
     return list(zip(x_values[stable_x], y_values[stable_y]))
 
 
+def _optimization_coordinates(cube, flag, optimization_method):
+    if optimization_method == "stable_ground":
+        coordinates = _stable_ground_coordinates(flag)
+        return coordinates, len(coordinates)
+    return itertools.product(cube.ds["x"].values, cube.ds["y"].values), cube.nx * cube.ny
+
+
 async def process_block(
     cube,
     block,
@@ -37,13 +44,10 @@ async def process_block(
 ):
     """Optimize the coef on a given block"""
 
-    if optimization_method == "stable_ground":  # We only compute stable ground pixels
-        xy_values = _stable_ground_coordinates(flag)
-    else:
-        xy_values = list(itertools.product(cube.ds["x"].values, cube.ds["y"].values))
+    xy_values, n_xy_values = _optimization_coordinates(cube, flag, optimization_method)
 
     # Progression bar
-    xy_values_tqdm = tqdm(xy_values, total=len(xy_values))
+    xy_values_tqdm = tqdm(xy_values, total=n_xy_values)
 
     # Filter cube
     obs_filt, flag_block = block.filter_cube_before_inversion(**preData_kwargs, flag=flag)

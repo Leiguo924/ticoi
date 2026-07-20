@@ -1,10 +1,15 @@
+import itertools
+
 import dask.array as da
 import numpy as np
 import xarray as xr
 
 from ticoi.core import _assign_block_results, chunk_to_block
 from ticoi.cube_data_classxr import CubeDataClass
-from ticoi.optimize_coefficient_functions import _stable_ground_coordinates
+from ticoi.optimize_coefficient_functions import (
+    _optimization_coordinates,
+    _stable_ground_coordinates,
+)
 
 
 def _chunked_cube():
@@ -81,3 +86,14 @@ def test_stable_ground_coordinates_preserve_sel_order_for_both_dim_orders():
         actual = _stable_ground_coordinates(flag)
 
         assert actual == expected
+
+
+def test_nonstable_optimization_coordinates_are_lazy_and_ordered():
+    cube = _chunked_cube()
+    expected = list(itertools.product(cube.ds["x"].values, cube.ds["y"].values))
+
+    actual, total = _optimization_coordinates(cube, None, "other")
+
+    assert not isinstance(actual, list)
+    assert total == cube.nx * cube.ny
+    assert list(actual) == expected
