@@ -61,6 +61,11 @@ def test_chunk_to_block_uses_largest_spatial_chunks_for_budget():
     max_tile_bytes = ds.isel(x=slice(0, 8), y=slice(0, 8)).nbytes
 
     blocks = chunk_to_block(cube, block_size=max_tile_bytes * 1.01 / 1024**3)
+    assert blocks == [
+        [0, 1, 0, 1], [1, 9, 0, 1], [9, 10, 0, 1],
+        [0, 1, 1, 9], [1, 9, 1, 9], [9, 10, 1, 9],
+        [0, 1, 9, 10], [1, 9, 9, 10], [9, 10, 9, 10],
+    ]
 
     coverage = np.zeros((cube.ny, cube.nx), dtype=np.uint8)
     assembled = [None] * (cube.nx * cube.ny)

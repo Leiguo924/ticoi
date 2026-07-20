@@ -1096,6 +1096,8 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
 
         nblocks_x = int(np.ceil(len(x_chunks) / x_step))
         nblocks_y = int(np.ceil(len(y_chunks) / y_step))
+        x_boundaries = list(itertools.accumulate(x_chunks, initial=0))
+        y_boundaries = list(itertools.accumulate(y_chunks, initial=0))
 
         nblocks = nblocks_x * nblocks_y
         if verbose:
@@ -1106,10 +1108,10 @@ def chunk_to_block(cube: CubeDataClass, block_size: float = 1, verbose: bool = F
 
         for i in range(nblocks_y):
             for j in range(nblocks_x):
-                x_start = sum(x_chunks[: j * x_step])
-                y_start = sum(y_chunks[: i * y_step])
-                x_end = sum(x_chunks[: (j + 1) * x_step]) if j != nblocks_x - 1 else ds.sizes["x"]
-                y_end = sum(y_chunks[: (i + 1) * y_step]) if i != nblocks_y - 1 else ds.sizes["y"]
+                x_start = x_boundaries[j * x_step]
+                y_start = y_boundaries[i * y_step]
+                x_end = x_boundaries[min((j + 1) * x_step, len(x_chunks))]
+                y_end = y_boundaries[min((i + 1) * y_step, len(y_chunks))]
                 blocks.append([x_start, x_end, y_start, y_end])
     else:
         blocks.append([0, cube.ds.sizes["x"], 0, cube.ds.sizes["y"]])
