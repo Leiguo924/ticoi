@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import scipy.sparse as sp
 
 from ticoi.core import mu_regularisation
 from ticoi.inversion_functions import (
@@ -228,3 +229,29 @@ class Test_inversion:
             rtol=1e-6,
             atol=1,
         )
+
+    def test_norm_residual_matches_weighted_boundary_baseline_exactly(self):
+        weight = np.array([1.0, 0.5, 0.0, 0.8, 1.0, 0.0, 0.3, 1.0, 0.6, 1.0])
+        x, actual = inversion_one_component(
+            self.A,
+            self.dates_range,
+            1,
+            self.data,
+            solver="LSMR",
+            Weight=weight,
+            mu=self.mu1accelnotnull,
+            coef=100,
+            result_quality=["Norm_residual"],
+        )
+        keep = weight != 0
+        f_regu = 100 * self.mu1accelnotnull
+        f = sp.csc_matrix(np.vstack([weight[keep, None] * self.A[keep], f_regu]).astype("float64"))
+        d = np.hstack([weight[keep] * self.data[keep, 1], np.zeros(f_regu.shape[0])]).astype("float64")
+        residual = f.dot(x) - d
+        old_boundary = np.multiply(weight[keep], self.data[keep, 1]).shape[0]
+        expected = [
+            np.linalg.norm(residual[:old_boundary], ord=2),
+            np.linalg.norm(residual[old_boundary:] / 100, ord=2),
+        ]
+
+        np.testing.assert_array_equal(actual, expected)

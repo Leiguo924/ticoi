@@ -553,9 +553,10 @@ def inversion_one_component(
 
     if result_quality is not None and "Norm_residual" in result_quality:  # to show the L_curve
         R_lcurve = F.dot(X) - D  # 50.7 µs ± 327 ns per loop (mean ± std. dev. of 7 runs, 10,000 loops each)
+        n_observations = D.shape[0] - D_regu.shape[0]
         residu_norm = [
-            np.linalg.norm(R_lcurve[: np.multiply(Weight[Weight != 0], v[Weight != 0]).shape[0]], ord=2),
-            np.linalg.norm(R_lcurve[np.multiply(Weight[Weight != 0], v[Weight != 0]).shape[0] :] / coef, ord=2),
+            np.linalg.norm(R_lcurve[:n_observations], ord=2),
+            np.linalg.norm(R_lcurve[n_observations:] / coef, ord=2),
         ]
     else:
         residu_norm = None
