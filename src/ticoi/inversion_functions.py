@@ -448,8 +448,8 @@ def inversion_one_component(
     regu: Regu = "1",
     accel: None | np.ndarray = None,
     linear_operator: "class_linear_operator" = None,
-    F_regu_csc: sp.csc_matrix | None = None,
     verbose: bool = False,
+    F_regu_csc: sp.csc_matrix | None = None,
 ) -> (np.ndarray, np.ndarray | None):
     """
     Invert the system AX = Y for one component of the velocity, using a given solver

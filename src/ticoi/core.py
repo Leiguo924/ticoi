@@ -82,8 +82,8 @@ def inversion_iteration(
     linear_operator=Union["class_linear_operator", None],
     result_quality: list | str | None = None,
     ini: np.ndarray | None = None,
-    F_regu_csc: sp.csc_matrix | None = None,
     verbose: bool = False,
+    F_regu_csc: sp.csc_matrix | None = None,
 ) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None):
     """
     Compute an iteration of the inversion : update the weights using the weights from the previous iteration and the studentized residual, update the results in consequence
