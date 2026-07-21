@@ -493,7 +493,8 @@ def inversion_one_component(
         condi = Weight != 0
         W = Weight[condi]
         if solver in ("LSMR", "LSMR_ini"):
-            weighted_A = sp.csc_matrix(A[condi]).multiply(W[:, np.newaxis])
+            weighted_A = sp.csc_matrix(A[condi], dtype="float64")
+            weighted_A.data *= W[weighted_A.indices]
         else:
             weighted_A = np.multiply(W[:, np.newaxis], A[condi])
         weighted_v = np.multiply(W, v[condi])
