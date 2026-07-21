@@ -448,6 +448,7 @@ def inversion_one_component(
     regu: Regu = "1",
     accel: None | np.ndarray = None,
     linear_operator: "class_linear_operator" = None,
+    F_regu_csc: sp.csc_matrix | None = None,
     verbose: bool = False,
 ) -> (np.ndarray, np.ndarray | None):
     """
@@ -489,7 +490,11 @@ def inversion_one_component(
         D_regu = np.zeros(mu.shape[0])
 
     if linear_operator is None:
-        F_regu = np.multiply(coef, mu)
+        F_regu = (
+            None
+            if F_regu_csc is not None and solver in ("LSMR", "LSMR_ini")
+            else np.multiply(coef, mu)
+        )
         condi = Weight != 0
         W = Weight[condi]
         if solver in ("LSMR", "LSMR_ini"):
@@ -507,7 +512,8 @@ def inversion_one_component(
         )
 
     if solver == "LSMR":
-        F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
+        regularization = F_regu_csc if F_regu_csc is not None else sp.csc_matrix(F_regu)
+        F = sp.vstack([weighted_A, regularization], format="csc")
         D = np.hstack([weighted_v, D_regu]).astype("float64")
         del weighted_A, weighted_v, condi, W
         X = sp.linalg.lsmr(
@@ -521,7 +527,8 @@ def inversion_one_component(
             raise ValueError("Please provide an initialization for the solver LSMR_ini")
         # 16.7 ms ± 141 µs per loop (mean ± std. dev. of 7 runs, 100 loops each)
         if not linear_operator:
-            F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
+            regularization = F_regu_csc if F_regu_csc is not None else sp.csc_matrix(F_regu)
+            F = sp.vstack([weighted_A, regularization], format="csc")
             if verbose:
                 print("Is F convex?", is_convex(F.toarray()))
             D = np.hstack([weighted_v, D_regu])  # stack ax and regu, and remove rows with only

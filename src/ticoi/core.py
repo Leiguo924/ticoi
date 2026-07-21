@@ -82,6 +82,7 @@ def inversion_iteration(
     linear_operator=Union["class_linear_operator", None],
     result_quality: list | str | None = None,
     ini: np.ndarray | None = None,
+    F_regu_csc: sp.csc_matrix | None = None,
     verbose: bool = False,
 ) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None):
     """
@@ -180,6 +181,7 @@ def inversion_iteration(
                 regu=regu,
                 accel=accel,
                 linear_operator=linear_operator,
+                F_regu_csc=F_regu_csc,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -195,6 +197,7 @@ def inversion_iteration(
                 regu=regu,
                 accel=accel,
                 linear_operator=linear_operator,
+                F_regu_csc=F_regu_csc,
             )
         else:  # Initialization with the list ini, which can be a moving average
             result_dx, residu_normx = inversion_one_component(
@@ -211,6 +214,7 @@ def inversion_iteration(
                 regu=regu,
                 accel=accel,
                 linear_operator=linear_operator,
+                F_regu_csc=F_regu_csc,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -226,6 +230,7 @@ def inversion_iteration(
                 regu=regu,
                 accel=accel,
                 linear_operator=linear_operator,
+                F_regu_csc=F_regu_csc,
             )
 
     else:  # No initialization
@@ -242,6 +247,7 @@ def inversion_iteration(
             regu=regu,
             accel=accel,
             linear_operator=linear_operator,
+            F_regu_csc=F_regu_csc,
         )
         result_dy, residu_normy = inversion_one_component(
             A,
@@ -256,6 +262,7 @@ def inversion_iteration(
             regu=regu,
             accel=accel,
             linear_operator=linear_operator,
+            F_regu_csc=F_regu_csc,
         )
 
     return result_dx, result_dy, weightx, weighty, residu_normx, residu_normy
@@ -377,6 +384,10 @@ def inversion_core(
             else:
                 mu = mu_regularisation(regu, A, dates_range, ini=mean)
 
+        F_regu_csc = None
+        if not linear_operator and solver in ("LSMR", "LSMR_ini") and regu != "directionxy":
+            F_regu_csc = sp.csc_matrix(np.multiply(coef, mu))
+
         ##  Initialisation (depending on apriori and solver)
         # # Apriori on acceleration (following)
         # TODO: we can make it shorter
@@ -420,6 +431,7 @@ def inversion_core(
                 regu=regu,
                 linear_operator=linear_operator,
                 accel=accel,
+                F_regu_csc=F_regu_csc,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -435,6 +447,7 @@ def inversion_core(
                 regu=regu,
                 linear_operator=linear_operator,
                 accel=accel,
+                F_regu_csc=F_regu_csc,
             )
 
         if not visual:
@@ -472,6 +485,7 @@ def inversion_core(
                 linear_operator=linear_operator,
                 ini=None,
                 accel=accel,
+                F_regu_csc=F_regu_csc,
                 result_quality=result_quality,
             )
             # Continue to iterate until the difference between two results is lower than threshold_it or the number of iteration larger than 10
@@ -497,6 +511,7 @@ def inversion_core(
                     linear_operator=linear_operator,
                     ini=None,
                     accel=accel,
+                    F_regu_csc=F_regu_csc,
                     result_quality=result_quality,
                 )
 
