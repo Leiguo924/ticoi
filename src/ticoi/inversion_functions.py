@@ -104,7 +104,7 @@ def construction_dates_range_np(data: np.ndarray) -> np.ndarray:
     return dates
 
 
-@jit(nopython=True)  # use numba
+@jit(nopython=True, cache=True)  # use numba; persist compiled kernels across runs
 def construction_a_lf(dates: np.ndarray, dates_range: np.ndarray) -> np.ndarray:
     """
     Construction of the design matrix A in the formulation AX = Y.
@@ -267,13 +267,13 @@ def externally_studentized_residual(
     # =========================================================================%% #
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def average_absolute_deviation(data: np.ndarray) -> float:
     """Computes the Average Absolute Deviation (AAD). Used when the Median Absolute Deviation (MAD) is equal to 0."""
     return np.mean(np.absolute(data - np.mean(data)))
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def find_date_obs(data: np.ndarray, dates_range: np.ndarray) -> np.ndarray:
     """
     Finds the index in dates_range corresponding to each first and last date in data
@@ -286,7 +286,7 @@ def find_date_obs(data: np.ndarray, dates_range: np.ndarray) -> np.ndarray:
     return np.column_stack((date1_indices, date2_indices))
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def matvecregu1_numba(
     X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray, delta: np.ndarray, coef: int, weight: np.ndarray
 ):
@@ -296,14 +296,14 @@ def matvecregu1_numba(
     return Y
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def matvec_numba(X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray):
     for j in range(len(identification_obs)):
         Y[j] = np.sum(X[identification_obs[j][0] : identification_obs[j][1] + 1])
     return Y
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def rmatvecregu1_numba(X, Y, identification_obs, coef, delta, weight):
     for j in range(len(identification_obs)):
         X[identification_obs[j][0] : identification_obs[j][1] + 1] += Y[j] * weight[j]
@@ -314,7 +314,7 @@ def rmatvecregu1_numba(X, Y, identification_obs, coef, delta, weight):
     return X
 
 
-@jit(nopython=True)
+@jit(nopython=True, cache=True)
 def rmatvecA_numba(X, Y, identification_obs):
     for j in range(len(identification_obs)):
         X[identification_obs[j][0] : identification_obs[j][1] + 1] += Y[j]
