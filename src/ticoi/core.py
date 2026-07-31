@@ -289,6 +289,7 @@ def inversion_core(
     apriori_weight_in_second_iteration: bool = False,
     visual: bool = False,
     verbose: bool = False,
+    diagnostics: dict | None = None,
 ) -> (np.ndarray, pd.DataFrame, pd.DataFrame):  # type: ignore
     """
     Computes A in AX = Y and does the inversion using a given solver and regularization.
@@ -531,6 +532,12 @@ def inversion_core(
                 print("[Inversion] End loop", i, np.mean(abs(result_dy_i - result_dy)))
                 print("[Inversion] Nb iteration", i)
 
+            if diagnostics is not None:
+                # ``i`` counts the initial solve plus each robust reweighting
+                # round, so it is also the number of LSMR solve rounds per
+                # velocity component for this pixel.
+                diagnostics["robust_solve_rounds"] = i
+
             if i == 2:
                 weight_iy = weight_2y
                 weight_ix = weight_2x
@@ -541,6 +548,8 @@ def inversion_core(
                     del data_values, data_dates
 
         else:  # If not iteration
+            if diagnostics is not None:
+                diagnostics["robust_solve_rounds"] = 1
             result_dy_i = result_dy
             result_dx_i = result_dx
 
