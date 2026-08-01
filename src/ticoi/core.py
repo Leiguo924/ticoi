@@ -42,12 +42,14 @@ from ticoi.interpolation_functions import (
 from ticoi.inversion_functions import (
     TukeyBiweight,
     class_linear_operator,
+    class_fast_linear_operator,
     construction_a_lf,
     construction_dates_range_np,
     find_date_obs,
     inversion_one_component,
     inversion_two_components,
     mu_regularisation,
+    mu_regularisation_sparse_first_order,
     weight_for_inversion,
 )
 from ticoi.pixel_class import PixelClass
@@ -84,6 +86,8 @@ def inversion_iteration(
     ini: np.ndarray | None = None,
     verbose: bool = False,
     F_regu_csc: sp.csc_matrix | None = None,
+    A_csc: sp.csc_matrix | None = None,
+    diagnostics: dict | None = None,
 ) -> (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None):
     """
     Compute an iteration of the inversion : update the weights using the weights from the previous iteration and the studentized residual, update the results in consequence
@@ -182,6 +186,8 @@ def inversion_iteration(
                 accel=accel,
                 linear_operator=linear_operator,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -198,6 +204,8 @@ def inversion_iteration(
                 accel=accel,
                 linear_operator=linear_operator,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
         else:  # Initialization with the list ini, which can be a moving average
             result_dx, residu_normx = inversion_one_component(
@@ -215,6 +223,8 @@ def inversion_iteration(
                 accel=accel,
                 linear_operator=linear_operator,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -231,6 +241,8 @@ def inversion_iteration(
                 accel=accel,
                 linear_operator=linear_operator,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
 
     else:  # No initialization
@@ -248,6 +260,8 @@ def inversion_iteration(
             accel=accel,
             linear_operator=linear_operator,
             F_regu_csc=F_regu_csc,
+            A_csc=A_csc,
+            diagnostics=diagnostics,
         )
         result_dy, residu_normy = inversion_one_component(
             A,
@@ -263,6 +277,8 @@ def inversion_iteration(
             accel=accel,
             linear_operator=linear_operator,
             F_regu_csc=F_regu_csc,
+            A_csc=A_csc,
+            diagnostics=diagnostics,
         )
 
     return result_dx, result_dy, weightx, weighty, residu_normx, residu_normy
@@ -283,13 +299,14 @@ def inversion_core(
     conf: bool = False,
     mean: list | None = None,
     detect_temporal_decorrelation: bool = True,
-    linear_operator: bool = False,
+    linear_operator: bool | Literal["fast"] = False,
     result_quality: list | str | None = None,
     nb_max_iteration: int = 10,
     apriori_weight_in_second_iteration: bool = False,
     visual: bool = False,
     verbose: bool = False,
     diagnostics: dict | None = None,
+    reuse_observation_csc: bool = True,
 ) -> (np.ndarray, pd.DataFrame, pd.DataFrame):  # type: ignore
     """
     Computes A in AX = Y and does the inversion using a given solver and regularization.
@@ -307,7 +324,7 @@ def inversion_core(
     :param conf: [bool] [default is False] --- If True means that the error corresponds to confidence intervals between 0 and 1, otherwise it corresponds to errors in m/y or m/d
     :param mean: [list | None] [default is None] --- Apriori on the average
     :param detect_temporal_decorrelation: [bool] [default is True] --- If True the first inversion is solved using only velocity observations with small temporal baselines, to detect temporal decorelation
-    :param linear_operator: [bool] [default is False] --- If linear operator, the inversion is performed using a linear operator (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html)
+    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR_ini with first-order regularization.
     :param result_quality: [list | str | None] [default is None] --- List which can contain 'Norm_residual' to determine the L2 norm of the residuals from the last inversion, 'X_contribution' to determine the number of Y observations which have contributed to estimate each value in X (it corresponds to A.dot(weight))
     :param nb_max_iteration: [int] [default is 10] --- Maximum number of iterations
     :param apriori_weight_in_second_iteration: [bool] [default is False] --- it True use the error to weight each of the iterations, if not use it only in the first iteration
@@ -320,6 +337,13 @@ def inversion_core(
     """
 
     if data[0].size:  # If there are available data on this pixel
+        if linear_operator == "fast" and (
+            solver != "LSMR_ini" or regu not in ("1", "1accelnotnull")
+        ):
+            raise ValueError(
+                "linear_operator='fast' requires solver='LSMR_ini' and "
+                "regu='1' or regu='1accelnotnull'"
+            )
         # Split the data, with one dtype per array
         if len(data) == 3:
             data_dates, data_values, data_str = data
@@ -335,7 +359,11 @@ def inversion_core(
             A = construction_a_lf(data_dates, dates_range)
             linear_operator = None
         else:  # use a linear operator to solve the inversion, it is sometimes faster
-            linear_operator = class_linear_operator()
+            linear_operator = (
+                class_fast_linear_operator()
+                if linear_operator == "fast"
+                else class_linear_operator()
+            )
             linear_operator.load(
                 find_date_obs(data_dates[:, :2], dates_range), dates_range, coef
             )  # load parameter of the linear operator
@@ -379,15 +407,23 @@ def inversion_core(
                 )  # Delete quality indicator, which are not needed anymore
         # Compute regularisation matrix
         if not linear_operator:
-            if regu == "directionxy":
+            if solver in ("LSMR", "LSMR_ini") and regu in ("1", "1accelnotnull"):
+                mu = mu_regularisation_sparse_first_order(A.shape[1], dates_range)
+            elif regu == "directionxy":
                 # Constrain according to the vectorial product, the magnitude of the vector corresponds to mean2, the magnitude of a rolling mean
                 mu = mu_regularisation(regu, A, dates_range, ini=mean)
             else:
                 mu = mu_regularisation(regu, A, dates_range, ini=mean)
 
         F_regu_csc = None
+        A_csc = None
         if not linear_operator and solver in ("LSMR", "LSMR_ini") and regu != "directionxy":
-            F_regu_csc = sp.csc_matrix(np.multiply(coef, mu))
+            F_regu_csc = sp.csc_matrix(mu * coef)
+            # A is shared by vx/vy and every robust reweighting round.  The
+            # old path rescanned the dense matrix to rebuild the same sparse
+            # structure before every LSMR call.
+            if reuse_observation_csc:
+                A_csc = sp.csc_matrix(A, dtype="float64")
 
         ##  Initialisation (depending on apriori and solver)
         # # Apriori on acceleration (following)
@@ -433,6 +469,8 @@ def inversion_core(
                 linear_operator=linear_operator,
                 accel=accel,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
             result_dy, residu_normy = inversion_one_component(
                 A,
@@ -449,6 +487,8 @@ def inversion_core(
                 linear_operator=linear_operator,
                 accel=accel,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
             )
 
         if not visual:
@@ -487,6 +527,8 @@ def inversion_core(
                 ini=None,
                 accel=accel,
                 F_regu_csc=F_regu_csc,
+                A_csc=A_csc,
+                diagnostics=diagnostics,
                 result_quality=result_quality,
             )
             # Continue to iterate until the difference between two results is lower than threshold_it or the number of iteration larger than 10
@@ -513,6 +555,8 @@ def inversion_core(
                     ini=None,
                     accel=accel,
                     F_regu_csc=F_regu_csc,
+                    A_csc=A_csc,
+                    diagnostics=diagnostics,
                     result_quality=result_quality,
                 )
 

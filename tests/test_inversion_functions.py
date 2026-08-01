@@ -4,10 +4,14 @@ import scipy.sparse as sp
 
 from ticoi.core import mu_regularisation
 from ticoi.inversion_functions import (
+    class_fast_linear_operator,
+    class_linear_operator,
     construction_a_lf,
     construction_dates_range_np,
+    find_date_obs,
     inversion_one_component,
     inversion_two_components,
+    mu_regularisation_sparse_first_order,
 )
 
 
@@ -98,6 +102,7 @@ class Test_inversion:
         expected = self.A
         actual = construction_a_lf(self.dates, self.dates_range)
         np.testing.assert_array_equal(actual, expected, err_msg="Construction A LP does not give the correct result")
+        assert actual.dtype == np.int8
 
     @pytest.mark.parametrize("regu", ["1", "1accelnotnull"])
     def test_first_order_regularization_matches_full_matrix_baseline_exactly(self, regu):
@@ -110,6 +115,15 @@ class Test_inversion:
         actual = mu_regularisation(regu, self.A, self.dates_range)
 
         np.testing.assert_array_equal(actual, expected)
+
+    def test_sparse_first_order_regularization_matches_dense_exactly(self):
+        dense = mu_regularisation("1accelnotnull", self.A, self.dates_range)
+        sparse = mu_regularisation_sparse_first_order(
+            self.A.shape[1], self.dates_range
+        )
+
+        assert sp.isspmatrix_csc(sparse)
+        np.testing.assert_array_equal(sparse.toarray(), dense)
 
     def test_second_order_regularization_matches_range_baseline_exactly(self):
         delta = np.diff(self.dates_range) / np.timedelta64(1, "D")
@@ -268,6 +282,110 @@ class Test_inversion:
         ]
 
         np.testing.assert_array_equal(actual, expected)
+
+    def test_cached_observation_csc_matches_rebuild_exactly(self):
+        weight = np.array([1.0, 0.5, 0.0, 0.8, 1.0, 0.0, 0.3, 1.0, 0.6, 1.0])
+        kwargs = dict(
+            solver="LSMR",
+            Weight=weight,
+            mu=self.mu1accelnotnull,
+            coef=100,
+        )
+        rebuilt = inversion_one_component(
+            self.A, self.dates_range, 1, self.data, **kwargs
+        )[0]
+        cached = inversion_one_component(
+            self.A,
+            self.dates_range,
+            1,
+            self.data,
+            A_csc=sp.csc_matrix(self.A, dtype="float64"),
+            **kwargs,
+        )[0]
+        np.testing.assert_array_equal(cached, rebuilt, strict=True)
+
+    def test_legacy_linear_operator_remains_equivalent_to_explicit_design(self):
+        operator = class_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        x = np.linspace(-2.0, 3.0, self.A.shape[1])
+        y = np.linspace(0.25, 1.25, self.A.shape[0])
+
+        np.testing.assert_allclose(operator.matvec(x), self.A @ x, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(operator.rmatvec(y), self.A.T @ y, rtol=0, atol=1e-12)
+
+    def test_interval_linear_operator_matches_explicit_design_and_adjoint(self):
+        operator = class_fast_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        x = np.linspace(-2.0, 3.0, self.A.shape[1])
+        y = np.linspace(0.25, 1.25, self.A.shape[0])
+
+        np.testing.assert_allclose(operator.matvec(x), self.A @ x, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(operator.rmatvec(y), self.A.T @ y, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(
+            np.dot(operator.matvec(x), y),
+            np.dot(x, operator.rmatvec(y)),
+            rtol=0,
+            atol=1e-12,
+        )
+
+    def test_interval_linear_operator_weighted_regularization_matches_explicit(self):
+        operator = class_fast_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        weight = np.array([1.0, 0.5, 0.0, 0.8, 1.0, 0.0, 0.3, 1.0, 0.6, 1.0])
+        condition = weight != 0
+        operator.update_from_weight(np.ones(len(weight)), weight)
+        x = np.linspace(-2.0, 3.0, self.A.shape[1])
+        y = np.linspace(0.25, 1.25, condition.sum() + self.A.shape[1] - 1)
+        mu = mu_regularisation("1accelnotnull", self.A, self.dates_range)
+        explicit = np.vstack(
+            [weight[condition, None] * self.A[condition], 100 * mu]
+        )
+
+        np.testing.assert_allclose(operator.matvecregu1(x), explicit @ x, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(operator.rmatvecregu1(y), explicit.T @ y, rtol=0, atol=1e-12)
+
+    def test_interval_linear_operator_lsmr_matches_explicit_solution(self):
+        operator = class_fast_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        weight = np.linspace(0.2, 1.0, self.A.shape[0])
+        weight[::4] = 0
+        initial = np.linspace(-0.5, 0.5, self.A.shape[1])
+        accel = [np.zeros(self.A.shape[1] - 1), np.zeros(self.A.shape[1] - 1)]
+        mu = mu_regularisation("1accelnotnull", self.A, self.dates_range)
+
+        explicit = inversion_one_component(
+            self.A,
+            self.dates_range,
+            0,
+            self.data,
+            weight,
+            mu,
+            coef=100,
+            solver="LSMR_ini",
+            ini=initial,
+            regu="1accelnotnull",
+            accel=accel,
+        )[0]
+        interval = inversion_one_component(
+            self.A,
+            self.dates_range,
+            0,
+            self.data,
+            weight,
+            None,
+            coef=100,
+            solver="LSMR_ini",
+            ini=initial,
+            regu="1accelnotnull",
+            accel=accel,
+            linear_operator=operator,
+        )[0]
+
+        np.testing.assert_allclose(interval, explicit, rtol=0, atol=1e-8)
 
     def test_two_component_sparse_system_matches_dense_baseline_exactly(self, monkeypatch):
         weight = np.linspace(0.2, 1.0, 2 * self.A.shape[0])
