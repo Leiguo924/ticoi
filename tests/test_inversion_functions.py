@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import scipy.sparse as sp
 
-from ticoi.core import mu_regularisation
+from ticoi.core import inversion_core, mu_regularisation
 from ticoi.inversion_functions import (
     class_fast_linear_operator,
     class_linear_operator,
@@ -365,7 +365,46 @@ class Test_inversion:
         np.testing.assert_allclose(operator.matvecregu2(x), explicit @ x, rtol=0, atol=1e-12)
         np.testing.assert_allclose(operator.rmatvecregu2(y), explicit.T @ y, rtol=0, atol=1e-12)
 
-    @pytest.mark.parametrize("solver", ["LSMR", "LSMR_ini", "LSQR"])
+    @pytest.mark.parametrize("n_unknowns", [1, 2, 17, 64])
+    @pytest.mark.parametrize("regu", ["1", "2"])
+    def test_interval_operator_randomized_shapes_and_adjoint(self, n_unknowns, regu):
+        rng = np.random.default_rng(1000 + n_unknowns)
+        day_steps = rng.integers(1, 40, size=n_unknowns)
+        dates_range = np.datetime64("2000-01-01") + np.concatenate(
+            [[0], np.cumsum(day_steps)]
+        ).astype("timedelta64[D]")
+        n_observations = max(5, 4 * n_unknowns)
+        starts = rng.integers(0, n_unknowns, size=n_observations)
+        ends = np.array(
+            [rng.integers(start, n_unknowns) for start in starts], dtype=np.int64
+        )
+        intervals = np.column_stack([starts, ends])
+        explicit_a = np.zeros((n_observations, n_unknowns))
+        for row, (start, end) in enumerate(intervals):
+            explicit_a[row, start : end + 1] = 1
+        weight = rng.uniform(0.1, 1.0, size=n_observations)
+        weight[::7] = 0
+        condition = weight != 0
+
+        operator = class_fast_linear_operator()
+        operator.load(intervals, dates_range, coef=37)
+        operator.update_from_weight(np.ones(n_observations), weight)
+        mu = mu_regularisation(regu, explicit_a, dates_range)
+        explicit = np.vstack(
+            [weight[condition, None] * explicit_a[condition], 37 * mu]
+        )
+        x = rng.normal(size=n_unknowns)
+        y = rng.normal(size=explicit.shape[0])
+        matvec = operator.matvecregu2 if regu == "2" else operator.matvecregu1
+        rmatvec = operator.rmatvecregu2 if regu == "2" else operator.rmatvecregu1
+
+        np.testing.assert_allclose(matvec(x), explicit @ x, rtol=0, atol=1e-11)
+        np.testing.assert_allclose(rmatvec(y), explicit.T @ y, rtol=0, atol=1e-11)
+        np.testing.assert_allclose(
+            np.dot(matvec(x), y), np.dot(x, rmatvec(y)), rtol=0, atol=1e-10
+        )
+
+    @pytest.mark.parametrize("solver", ["LSMR", "LSMR_ini"])
     @pytest.mark.parametrize("regu", ["1", "2"])
     def test_interval_linear_operator_supports_iterative_solvers(self, solver, regu):
         operator = class_fast_linear_operator()
@@ -403,7 +442,7 @@ class Test_inversion:
             **kwargs,
         )
 
-        tolerance = 3e-5 if solver == "LSQR" else 1e-6
+        tolerance = 1e-6
         np.testing.assert_allclose(
             interval, explicit, rtol=tolerance, atol=tolerance * 0.1
         )
@@ -450,6 +489,168 @@ class Test_inversion:
         )[0]
 
         np.testing.assert_allclose(interval, explicit, rtol=0, atol=1e-8)
+
+    @pytest.mark.parametrize(
+        "solver, regu",
+        [
+            ("LSMR", "1"),
+            ("LSMR", "1accelnotnull"),
+            ("LSMR", "2"),
+            ("LSMR_ini", "1"),
+            ("LSMR_ini", "1accelnotnull"),
+            ("LSMR_ini", "2"),
+        ],
+    )
+    def test_fast_inversion_core_supports_quality_outputs(self, solver, regu):
+        temporal_baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        data_values = np.column_stack(
+            [
+                self.data,
+                np.full((self.data.shape[0], 2), 2.0),
+                temporal_baseline,
+            ]
+        )
+        kwargs = dict(
+            dates_range=self.dates_range,
+            solver=solver,
+            regu=regu,
+            coef=100,
+            iteration=True,
+            detect_temporal_decorrelation=False,
+            result_quality=["X_contribution", "Norm_residual", "Error_propagation"],
+        )
+        if solver == "LSMR_ini" or regu == "1accelnotnull":
+            kwargs["mean"] = [
+                np.zeros(self.A.shape[1]),
+                np.zeros(self.A.shape[1]),
+            ]
+
+        explicit = inversion_core(
+            [self.dates.copy(), data_values.copy()], 0, 0, **kwargs
+        )[1]
+        fast_diagnostics = {}
+        fast = inversion_core(
+            [self.dates.copy(), data_values.copy()],
+            0,
+            0,
+            linear_operator="fast",
+            diagnostics=fast_diagnostics,
+            **kwargs,
+        )[1]
+
+        assert fast[["date1", "date2"]].equals(explicit[["date1", "date2"]])
+        tolerance = 1e-6
+        numeric_columns = fast.columns.difference(["date1", "date2"])
+        np.testing.assert_allclose(
+            fast[numeric_columns],
+            explicit[numeric_columns],
+            rtol=tolerance,
+            atol=tolerance,
+        )
+        if solver == "LSMR" and regu == "1accelnotnull":
+            assert (
+                fast_diagnostics["fast_operator_fallback"]
+                == "LSMR+1accelnotnull"
+            )
+        else:
+            assert "fast_operator_fallback" not in fast_diagnostics
+
+    @pytest.mark.parametrize(
+        "solver, regu",
+        [
+            ("LS", "1"),
+            ("L1", "1"),
+            ("LSQR", "1"),
+            ("LSMR", "directionxy"),
+            ("LSMR_ini", "directionxy"),
+            ("LSQR", "directionxy"),
+        ],
+    )
+    def test_fast_inversion_core_rejects_unsupported_systems(self, solver, regu):
+        data_values = np.column_stack(
+            [self.data, np.ones((self.data.shape[0], 2)), np.full(10, 16)]
+        )
+
+        with pytest.raises(ValueError, match="linear_operator='fast' supports"):
+            inversion_core(
+                [self.dates.copy(), data_values],
+                0,
+                0,
+                dates_range=self.dates_range,
+                solver=solver,
+                regu=regu,
+                linear_operator="fast",
+            )
+
+    def test_fast_inversion_core_matches_visual_weighted_robust_path(self):
+        temporal_baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        data_values = np.column_stack(
+            [
+                self.data,
+                np.linspace(1.0, 3.0, self.data.shape[0]),
+                np.linspace(1.5, 4.0, self.data.shape[0]),
+                temporal_baseline,
+            ]
+        )
+        data_str = np.column_stack(
+            [np.full(10, "S2"), np.full(10, "ITS_LIVE")]
+        )
+        mean = [np.zeros(self.A.shape[1]), np.zeros(self.A.shape[1])]
+        kwargs = dict(
+            dates_range=self.dates_range,
+            solver="LSMR_ini",
+            regu="1accelnotnull",
+            coef=100,
+            mean=mean,
+            iteration=True,
+            apriori_weight=True,
+            apriori_weight_in_second_iteration=True,
+            detect_temporal_decorrelation=True,
+            result_quality=["X_contribution", "Norm_residual", "Error_propagation"],
+            visual=True,
+        )
+
+        explicit = inversion_core(
+            [self.dates.copy(), data_values.copy(), data_str.copy()],
+            0,
+            0,
+            **kwargs,
+        )
+        fast = inversion_core(
+            [self.dates.copy(), data_values.copy(), data_str.copy()],
+            0,
+            0,
+            linear_operator="fast",
+            **kwargs,
+        )
+
+        assert fast[1][["date1", "date2"]].equals(
+            explicit[1][["date1", "date2"]]
+        )
+        result_columns = fast[1].columns.difference(["date1", "date2"])
+        np.testing.assert_allclose(
+            fast[1][result_columns], explicit[1][result_columns], rtol=1e-6, atol=1e-6
+        )
+        data_columns = [
+            "vx",
+            "vy",
+            "errorx",
+            "errory",
+            "weightinix",
+            "weightiniy",
+            "weightlastx",
+            "weightlasty",
+            "residux",
+            "residuy",
+            "NormR",
+        ]
+        np.testing.assert_allclose(
+            fast[2][data_columns], explicit[2][data_columns], rtol=1e-6, atol=1e-6
+        )
 
     def test_two_component_sparse_system_matches_dense_baseline_exactly(self, monkeypatch):
         weight = np.linspace(0.2, 1.0, 2 * self.A.shape[0])

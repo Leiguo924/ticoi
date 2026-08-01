@@ -115,7 +115,11 @@ def inversion_iteration(
     """
 
     def compute_residual(A: np.ndarray, v: np.ndarray, X: np.ndarray) -> np.ndarray:
-        Residu = v - A.dot(X)
+        if isinstance(linear_operator, class_fast_linear_operator):
+            predicted = linear_operator.matvec_direct(X)
+        else:
+            predicted = A.dot(X)
+        Residu = v - predicted
         return Residu
 
     def weightf(residu: np.ndarray, Weight: np.ndarray) -> np.ndarray:
@@ -324,7 +328,7 @@ def inversion_core(
     :param conf: [bool] [default is False] --- If True means that the error corresponds to confidence intervals between 0 and 1, otherwise it corresponds to errors in m/y or m/d
     :param mean: [list | None] [default is None] --- Apriori on the average
     :param detect_temporal_decorrelation: [bool] [default is True] --- If True the first inversion is solved using only velocity observations with small temporal baselines, to detect temporal decorelation
-    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR/LSMR_ini/LSQR with first- or second-order regularization.
+    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR with first- or second-order regularization, or LSMR_ini with first-order, non-zero-acceleration first-order, or second-order regularization. LSMR without an initial estimate and regu="1accelnotnull" automatically uses the explicit CSC path because robust reweighting amplifies LinearOperator round-off for that ill-conditioned combination.
     :param result_quality: [list | str | None] [default is None] --- List which can contain 'Norm_residual' to determine the L2 norm of the residuals from the last inversion, 'X_contribution' to determine the number of Y observations which have contributed to estimate each value in X (it corresponds to A.dot(weight))
     :param nb_max_iteration: [int] [default is 10] --- Maximum number of iterations
     :param apriori_weight_in_second_iteration: [bool] [default is False] --- it True use the error to weight each of the iterations, if not use it only in the first iteration
@@ -337,15 +341,31 @@ def inversion_core(
     """
 
     if data[0].size:  # If there are available data on this pixel
-        if linear_operator == "fast" and (
-            solver not in ("LSMR", "LSMR_ini", "LSQR")
-            or regu not in ("1", "1accelnotnull", "2")
-        ):
+        fast_supported = solver in ("LSMR", "LSMR_ini") and regu in (
+            "1",
+            "1accelnotnull",
+            "2",
+        )
+        if linear_operator == "fast" and not fast_supported:
             raise ValueError(
-                "linear_operator='fast' requires solver='LSMR', "
-                "solver='LSMR_ini', or solver='LSQR' and regu='1', "
+                "linear_operator='fast' supports LSMR or LSMR_ini with regu='1', "
                 "regu='1accelnotnull', or regu='2'"
             )
+        # With a non-zero acceleration prior but no initial estimate, every
+        # production-size LSMR solve commonly reaches its iteration limit.  The
+        # mathematically equivalent interval operator then follows a slightly
+        # different floating-point trajectory from SciPy's explicit CSC
+        # matrix.  Tukey reweighting can amplify that round-off to percent-level
+        # output changes.  Preserve the historical result for this one unstable
+        # combination; LSMR_ini (the production path) remains accelerated.
+        if (
+            linear_operator == "fast"
+            and solver == "LSMR"
+            and regu == "1accelnotnull"
+        ):
+            linear_operator = False
+            if diagnostics is not None:
+                diagnostics["fast_operator_fallback"] = "LSMR+1accelnotnull"
         # Split the data, with one dtype per array
         if len(data) == 3:
             data_dates, data_values, data_str = data
@@ -493,7 +513,9 @@ def inversion_core(
                 diagnostics=diagnostics,
             )
 
-        if not visual:
+        # Non-iterative runs still need the initial weights below for quality
+        # products such as X_contribution and Error_propagation.
+        if not visual and iteration:
             del Weighty, Weightx
 
         if regu == "directionxy":
@@ -609,8 +631,12 @@ def inversion_core(
                 del Weighty, Weightx
         # compute the number of observations which have contributed to each estimated displacement
         if result_quality is not None and "X_contribution" in result_quality:
-            xcount_x = A.T.dot(weight_ix)
-            xcount_y = A.T.dot(weight_iy)
+            if isinstance(linear_operator, class_fast_linear_operator):
+                xcount_x = linear_operator.rmatvec_direct(weight_ix)
+                xcount_y = linear_operator.rmatvec_direct(weight_iy)
+            else:
+                xcount_x = A.T.dot(weight_ix)
+                xcount_y = A.T.dot(weight_iy)
 
         else:
             xcount_x = xcount_y = np.ones(result_dx_i.shape[0])
@@ -618,11 +644,29 @@ def inversion_core(
         # propagate the error
         if result_quality is not None and "Error_propagation" in result_quality:
 
-            def Prop_weight(F, weight, Residu, error):
+            # Error propagation forms and inverts the dense normal matrix.  A
+            # LinearOperator is sufficient for inversion and residuals, but it
+            # cannot be consumed by the existing element-wise propagation
+            # formula.  Materialize the original matrices only when this
+            # explicitly requested quality product is needed.
+            if linear_operator is not None:
+                quality_A = construction_a_lf(data_dates, dates_range)
+                quality_mu = mu_regularisation(regu, quality_A, dates_range)
+            else:
+                quality_A = A
+                quality_mu = mu
+
+            def Prop_weight(F, regularization, weight, Residu, error):
                 error = np.max([Residu, error], axis=0)  # take the maximum between residuals and errors
                 W = weight.astype("float32")
                 FTWF = np.multiply(F.T, W[np.newaxis, :]) @ F
-                N = np.linalg.inv(FTWF + coef * mu.T @ mu)
+                regularization_normal = regularization.T @ regularization
+                if sp.issparse(regularization_normal):
+                    regularization_normal = regularization_normal.toarray()
+                N = np.linalg.inv(
+                    np.asarray(FTWF)
+                    + coef * np.asarray(regularization_normal)
+                )
                 Prop_weight = np.multiply(np.multiply(N @ F.T, W[np.newaxis, :]) * error, W[np.newaxis, :]) @ F @ N
                 sigma0_weight = np.sum(Residu**2 * weight) / (F.shape[0] - F.shape[1])
                 prop_wieght_diag = np.diag(Prop_weight)
@@ -632,14 +676,22 @@ def inversion_core(
 
                 return prop_wieght_diag, sigma0_weight, t_value
 
-            Residux = data_values[:, 0] - A @ result_dx_i  # has a normal distribution
+            Residux = data_values[:, 0] - quality_A @ result_dx_i  # has a normal distribution
             prop_wieght_diagx, sigma0_weightx, t_valuex = Prop_weight(
-                A, weight_ix, Residux, (data_values[:, 2] * data_values[:, -1] / unit) ** 2
+                quality_A,
+                quality_mu,
+                weight_ix,
+                Residux,
+                (data_values[:, 2] * data_values[:, -1] / unit) ** 2,
             )
 
-            Residuy = data_values[:, 1] - A @ result_dy_i  # has a normal distribution
+            Residuy = data_values[:, 1] - quality_A @ result_dy_i  # has a normal distribution
             prop_wieght_diagy, sigma0_weighty, t_valuey = Prop_weight(
-                A, weight_iy, Residuy, (data_values[:, 3] * data_values[:, -1] / unit) ** 2
+                quality_A,
+                quality_mu,
+                weight_iy,
+                Residuy,
+                (data_values[:, 3] * data_values[:, -1] / unit) ** 2,
             )
 
         # If visual, save the velocity observation, the errors, the initial weights (weightini), the last weights (weightlast), the residuals from the last inversion, the sensors, and the authors

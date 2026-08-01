@@ -616,6 +616,21 @@ class class_fast_linear_operator(class_linear_operator):
             X, Y, self.identification_obs_original
         )
 
+    def matvec_direct(self, X):
+        """Evaluate observation intervals in the legacy summation order.
+
+        Robust reweighting calls this only once per component and round.  The
+        direct O(nnz) evaluation prevents tiny prefix-subtraction differences
+        from being amplified when residuals lie near Tukey weight boundaries,
+        while iterative solver callbacks remain on the fast O(n_obs+n_dates)
+        implementation.
+        """
+        return super().matvec(X)
+
+    def rmatvec_direct(self, Y):
+        """Compute final contribution counts in the legacy summation order."""
+        return super().rmatvec(Y)
+
     # %% ======================================================================== #
     #                             PROPERTY OF THE SYSTEM                             #
     # =========================================================================%% #
@@ -840,14 +855,15 @@ def inversion_one_component(
         X = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1]))
 
     elif solver == "LSQR":
-        if linear_operator is None:
-            F = np.vstack([weighted_A, F_regu]).astype("float32")
-            D = np.hstack([weighted_v, D_regu]).astype("float32")
-            del weighted_A, weighted_v, condi, W
-            F = sp.csc_matrix(F)
-        else:
-            F = A_l
-            D = np.concatenate([linear_operator.Weight * v, D_regu])
+        if linear_operator is not None:
+            raise ValueError(
+                "LSQR requires the explicit float32 matrix path; its numerical "
+                "behavior is not equivalent through the linear operator"
+            )
+        F = np.vstack([weighted_A, F_regu]).astype("float32")
+        D = np.hstack([weighted_v, D_regu]).astype("float32")
+        del weighted_A, weighted_v, condi, W
+        F = sp.csc_matrix(F)
         X, istop, itn, r1norm = sp.linalg.lsqr(F, D)[:4]
 
     else:
