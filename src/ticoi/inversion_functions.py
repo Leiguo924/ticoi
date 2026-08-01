@@ -370,6 +370,50 @@ def fast_rmatvecregu1_numba(X, Y, identification_obs, coef, delta, weight):
 
 
 @jit(nopython=True, cache=True)
+def fast_matvecregu2_numba(
+    X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray,
+    delta: np.ndarray, coef: int, weight: np.ndarray
+):
+    prefix = np.empty(len(X) + 1, dtype=np.float64)
+    prefix[0] = 0.0
+    for j in range(len(X)):
+        prefix[j + 1] = prefix[j] + X[j]
+    for j in range(len(identification_obs)):
+        Y[j] = (
+            prefix[identification_obs[j][1] + 1]
+            - prefix[identification_obs[j][0]]
+        ) * weight[j]
+    offset = len(identification_obs)
+    for j in range(1, len(X) - 1):
+        Y[offset + j] = coef * (
+            X[j - 1] / delta[j - 1]
+            - 2.0 * X[j] / delta[j]
+            + X[j + 1] / delta[j + 1]
+        )
+    return Y
+
+
+@jit(nopython=True, cache=True)
+def fast_rmatvecregu2_numba(X, Y, identification_obs, coef, delta, weight):
+    difference = np.zeros(len(X) + 1, dtype=np.float64)
+    for j in range(len(identification_obs)):
+        value = Y[j] * weight[j]
+        difference[identification_obs[j][0]] += value
+        difference[identification_obs[j][1] + 1] -= value
+    running = 0.0
+    for j in range(len(X)):
+        running += difference[j]
+        X[j] = running
+    offset = len(identification_obs)
+    for j in range(1, len(X) - 1):
+        value = Y[offset + j] * coef
+        X[j - 1] += value / delta[j - 1]
+        X[j] -= 2.0 * value / delta[j]
+        X[j + 1] += value / delta[j + 1]
+    return X
+
+
+@jit(nopython=True, cache=True)
 def fast_rmatvecA_numba(X, Y, identification_obs):
     difference = np.zeros(len(X) + 1, dtype=np.float64)
     for j in range(len(identification_obs)):
@@ -540,6 +584,28 @@ class class_fast_linear_operator(class_linear_operator):
             self.Weight,
         )
 
+    def matvecregu2(self, X):
+        Y = np.zeros(len(self.identification_obs) + len(X))
+        return fast_matvecregu2_numba(
+            X,
+            Y,
+            self.identification_obs,
+            self.delta,
+            self.coef,
+            self.Weight,
+        )
+
+    def rmatvecregu2(self, Y):
+        X = np.zeros(self.X_length)
+        return fast_rmatvecregu2_numba(
+            X,
+            Y,
+            self.identification_obs,
+            self.coef,
+            self.delta,
+            self.Weight,
+        )
+
     def matvec(self, X):
         Y = np.zeros(len(self.identification_obs_original))
         return fast_matvec_numba(X, Y, self.identification_obs_original)
@@ -641,6 +707,11 @@ def inversion_one_component(
 
     if regu == "1accelnotnull":  # Apriori on the acceleration
         D_regu = np.multiply(accel[v_pos - 2], coef)
+    elif linear_operator is not None:
+        n_regu_rows = (
+            len(dates_range) - 1 if regu == "2" else len(dates_range) - 2
+        )
+        D_regu = np.zeros(n_regu_rows)
     else:
         D_regu = np.zeros(mu.shape[0])
 
@@ -668,17 +739,27 @@ def inversion_one_component(
         weighted_v = np.multiply(W, v[condi])
     else:
         v = linear_operator.update_from_weight(v, Weight)  # Update v, Weight,
+        if regu == "2" and hasattr(linear_operator, "matvecregu2"):
+            matvec_regu = linear_operator.matvecregu2
+            rmatvec_regu = linear_operator.rmatvecregu2
+        else:
+            matvec_regu = linear_operator.matvecregu1
+            rmatvec_regu = linear_operator.rmatvecregu1
         A_l = sp.linalg.LinearOperator(
-            (v.shape[0] + len(dates_range) - 2, len(dates_range) - 1),
-            matvec=linear_operator.matvecregu1,
-            rmatvec=linear_operator.rmatvecregu1,
+            (v.shape[0] + D_regu.shape[0], len(dates_range) - 1),
+            matvec=matvec_regu,
+            rmatvec=rmatvec_regu,
         )
 
     if solver == "LSMR":
-        regularization = F_regu_csc if F_regu_csc is not None else sp.csc_matrix(F_regu)
-        F = sp.vstack([weighted_A, regularization], format="csc")
-        D = np.hstack([weighted_v, D_regu]).astype("float64")
-        del weighted_A, weighted_v, condi, W
+        if linear_operator is None:
+            regularization = F_regu_csc if F_regu_csc is not None else sp.csc_matrix(F_regu)
+            F = sp.vstack([weighted_A, regularization], format="csc")
+            D = np.hstack([weighted_v, D_regu]).astype("float64")
+            del weighted_A, weighted_v, condi, W
+        else:
+            F = A_l
+            D = np.concatenate([linear_operator.Weight * v, D_regu])
         if diagnostics is not None:
             diagnostics["sparse_prep_seconds"] = diagnostics.get(
                 "sparse_prep_seconds", 0.0
@@ -728,8 +809,9 @@ def inversion_one_component(
             lsmr_result = sp.linalg.lsmr(F, D, x0=x0)
         else:
             solve_t0 = time.perf_counter()
-            lsmr_result = sp.linalg.lsmr(
-                A_l, np.concatenate([linear_operator.Weight * v, D_regu]), x0=x0)
+            F = A_l
+            D = np.concatenate([linear_operator.Weight * v, D_regu])
+            lsmr_result = sp.linalg.lsmr(F, D, x0=x0)
         if diagnostics is not None:
             diagnostics["lsmr_seconds"] = diagnostics.get(
                 "lsmr_seconds", 0.0
@@ -758,10 +840,14 @@ def inversion_one_component(
         X = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1]))
 
     elif solver == "LSQR":
-        F = np.vstack([weighted_A, F_regu]).astype("float32")
-        D = np.hstack([weighted_v, D_regu]).astype("float32")
-        del weighted_A, weighted_v, condi, W
-        F = sp.csc_matrix(F)
+        if linear_operator is None:
+            F = np.vstack([weighted_A, F_regu]).astype("float32")
+            D = np.hstack([weighted_v, D_regu]).astype("float32")
+            del weighted_A, weighted_v, condi, W
+            F = sp.csc_matrix(F)
+        else:
+            F = A_l
+            D = np.concatenate([linear_operator.Weight * v, D_regu])
         X, istop, itn, r1norm = sp.linalg.lsqr(F, D)[:4]
 
     else:

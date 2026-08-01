@@ -49,6 +49,25 @@ def test_numpy_smoothing_matches_dask_exactly():
     np.testing.assert_array_equal(actual, expected)
 
 
+def test_duplicate_date_jitter_is_reproducible_with_random_state():
+    rng = np.random.default_rng(19)
+    values = rng.normal(size=(20, 2, 2)).astype("float32")
+    dates = np.datetime64("2020-01-01") + np.arange(20) * np.timedelta64(12, "D")
+    dates[8] = dates[7]
+    dates = xr.DataArray(dates, dims="mid_date")
+    t_out = dates.values[:-1] + np.diff(dates.values) // 2
+
+    first = numpy_smooth_wrapper(
+        values, dates, t_out, t_win=11, order=3, axis=0, random_state=42
+    )
+    np.random.uniform(size=100)
+    second = numpy_smooth_wrapper(
+        values, dates, t_out, t_win=11, order=3, axis=0, random_state=42
+    )
+
+    np.testing.assert_array_equal(second, first)
+
+
 # import pytest
 # from ticoi.filtering_functions import numpy_ewma_vectorized,ewma_smooth, gaussian_smooth
 #

@@ -347,6 +347,70 @@ class Test_inversion:
         np.testing.assert_allclose(operator.matvecregu1(x), explicit @ x, rtol=0, atol=1e-12)
         np.testing.assert_allclose(operator.rmatvecregu1(y), explicit.T @ y, rtol=0, atol=1e-12)
 
+    def test_interval_linear_operator_second_order_matches_explicit(self):
+        operator = class_fast_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        weight = np.linspace(0.2, 1.0, self.A.shape[0])
+        weight[::4] = 0
+        condition = weight != 0
+        operator.update_from_weight(np.ones(len(weight)), weight)
+        x = np.linspace(-2.0, 3.0, self.A.shape[1])
+        y = np.linspace(0.25, 1.25, condition.sum() + self.A.shape[1])
+        mu = mu_regularisation("2", self.A, self.dates_range)
+        explicit = np.vstack(
+            [weight[condition, None] * self.A[condition], 100 * mu]
+        )
+
+        np.testing.assert_allclose(operator.matvecregu2(x), explicit @ x, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(operator.rmatvecregu2(y), explicit.T @ y, rtol=0, atol=1e-12)
+
+    @pytest.mark.parametrize("solver", ["LSMR", "LSMR_ini", "LSQR"])
+    @pytest.mark.parametrize("regu", ["1", "2"])
+    def test_interval_linear_operator_supports_iterative_solvers(self, solver, regu):
+        operator = class_fast_linear_operator()
+        intervals = find_date_obs(self.dates, self.dates_range)
+        operator.load(intervals, self.dates_range, coef=100)
+        weight = np.linspace(0.2, 1.0, self.A.shape[0])
+        weight[::4] = 0
+        mu = mu_regularisation(regu, self.A, self.dates_range)
+        kwargs = dict(
+            coef=100,
+            solver=solver,
+            regu=regu,
+            result_quality=["Norm_residual"],
+        )
+        if solver == "LSMR_ini":
+            kwargs["ini"] = np.linspace(-0.5, 0.5, self.A.shape[1])
+
+        explicit, explicit_norm = inversion_one_component(
+            self.A,
+            self.dates_range,
+            0,
+            self.data,
+            weight,
+            mu,
+            **kwargs,
+        )
+        interval, interval_norm = inversion_one_component(
+            self.A,
+            self.dates_range,
+            0,
+            self.data,
+            weight,
+            None,
+            linear_operator=operator,
+            **kwargs,
+        )
+
+        tolerance = 3e-5 if solver == "LSQR" else 1e-6
+        np.testing.assert_allclose(
+            interval, explicit, rtol=tolerance, atol=tolerance * 0.1
+        )
+        np.testing.assert_allclose(
+            interval_norm, explicit_norm, rtol=tolerance, atol=tolerance * 0.1
+        )
+
     def test_interval_linear_operator_lsmr_matches_explicit_solution(self):
         operator = class_fast_linear_operator()
         intervals = find_date_obs(self.dates, self.dates_range)

@@ -324,7 +324,7 @@ def inversion_core(
     :param conf: [bool] [default is False] --- If True means that the error corresponds to confidence intervals between 0 and 1, otherwise it corresponds to errors in m/y or m/d
     :param mean: [list | None] [default is None] --- Apriori on the average
     :param detect_temporal_decorrelation: [bool] [default is True] --- If True the first inversion is solved using only velocity observations with small temporal baselines, to detect temporal decorelation
-    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR_ini with first-order regularization.
+    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR/LSMR_ini/LSQR with first- or second-order regularization.
     :param result_quality: [list | str | None] [default is None] --- List which can contain 'Norm_residual' to determine the L2 norm of the residuals from the last inversion, 'X_contribution' to determine the number of Y observations which have contributed to estimate each value in X (it corresponds to A.dot(weight))
     :param nb_max_iteration: [int] [default is 10] --- Maximum number of iterations
     :param apriori_weight_in_second_iteration: [bool] [default is False] --- it True use the error to weight each of the iterations, if not use it only in the first iteration
@@ -338,11 +338,13 @@ def inversion_core(
 
     if data[0].size:  # If there are available data on this pixel
         if linear_operator == "fast" and (
-            solver != "LSMR_ini" or regu not in ("1", "1accelnotnull")
+            solver not in ("LSMR", "LSMR_ini", "LSQR")
+            or regu not in ("1", "1accelnotnull", "2")
         ):
             raise ValueError(
-                "linear_operator='fast' requires solver='LSMR_ini' and "
-                "regu='1' or regu='1accelnotnull'"
+                "linear_operator='fast' requires solver='LSMR', "
+                "solver='LSMR_ini', or solver='LSQR' and regu='1', "
+                "regu='1accelnotnull', or regu='2'"
             )
         # Split the data, with one dtype per array
         if len(data) == 3:

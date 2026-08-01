@@ -38,6 +38,24 @@ FiltMethod = Literal[
 ]
 
 
+def _jitter_duplicate_times(
+    t_obs: np.ndarray, random_state: int | None = None
+) -> np.ndarray:
+    """Make repeated observation times unique, optionally reproducibly.
+
+    ``random_state=None`` intentionally retains the historical global NumPy
+    random stream. Supplying an integer uses an isolated generator so callers
+    can make repeated runs deterministic without changing the default API.
+    """
+    if random_state is None:
+        uniform = np.random.uniform
+    else:
+        uniform = np.random.default_rng(random_state).uniform
+    while np.unique(t_obs).size < t_obs.size:
+        t_obs += uniform(low=0.01, high=0.09, size=t_obs.shape)
+    return t_obs
+
+
 # %% ======================================================================== #
 #                             TEMPORAL SMOOTHING                              #
 # =========================================================================%% #
@@ -268,6 +286,7 @@ def dask_smooth_wrapper(
     sigma: int = 3,
     order: int = 3,
     axis: int = 2,
+    random_state: int | None = None,
 ):
     """
     A function that wraps a Dask array to apply a smoothing function.
@@ -280,6 +299,7 @@ def dask_smooth_wrapper(
     :param sigma: Standard deviation for Gaussian smoothing (default is 3)
     :param order: Order of the smoothing function (default is 3)
     :param axis: Axis along which smoothing is applied (default is 2)
+    :param random_state: Optional seed for reproducible duplicate-date jitter
 
     :return: Smoothed dask array with specified parameters.
     """
@@ -295,10 +315,7 @@ def dask_smooth_wrapper(
         t_out = t_out - t_out.min()
 
     # Some mid_date could be exactly the same, this will raise error latter, so we add very small values to it
-    while np.unique(t_obs).size < t_obs.size:
-        t_obs += np.random.uniform(
-            low=0.01, high=0.09, size=t_obs.shape
-        )  # Add a small value to make it unique, for non-monotonic time point
+    t_obs = _jitter_duplicate_times(t_obs, random_state)
     t_obs.sort()
 
     t_interp = np.arange(
@@ -339,6 +356,7 @@ def numpy_smooth_wrapper(
     sigma: int = 3,
     order: int = 3,
     axis: int = 2,
+    random_state: int | None = None,
 ) -> np.ndarray:
     """Apply the same smoothing kernel without Dask scheduling overhead.
 
@@ -352,8 +370,7 @@ def numpy_smooth_wrapper(
     if t_out.min() < 0:
         t_obs = t_obs - t_out.min()
         t_out = t_out - t_out.min()
-    while np.unique(t_obs).size < t_obs.size:
-        t_obs += np.random.uniform(low=0.01, high=0.09, size=t_obs.shape)
+    t_obs = _jitter_duplicate_times(t_obs, random_state)
     t_obs.sort()
     t_interp = np.arange(0, int(max(t_obs.max(), t_out.max()) + 1), 1)
     filt_func = {
@@ -384,6 +401,7 @@ def df_smooth_wrapper(
     sigma: int = 3,
     order: int = 3,
     axis: int = 0,
+    random_state: int | None = None,
 ) -> pd.DataFrame | dd.DataFrame:
     """
     Apply smoothing to a Pandas or Dask DataFrame along the specified axis using the same
@@ -412,8 +430,7 @@ def df_smooth_wrapper(
         t_obs = t_obs - t_out.min()  # Ensure the output time points are within the range of interpolated points
         t_out = t_out - t_out.min()
 
-    while np.unique(t_obs).size < t_obs.size:
-        t_obs += np.random.uniform(low=0.01, high=0.09, size=t_obs.shape)
+    t_obs = _jitter_duplicate_times(t_obs, random_state)
     t_obs.sort()
 
     t_interp = np.arange(0, int(max(t_obs.max(), t_out.max()) + 1), 1)

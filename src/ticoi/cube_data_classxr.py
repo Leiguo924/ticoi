@@ -1326,6 +1326,7 @@ class CubeDataClass:
         proj: str = "EPSG:4326",
         velo_or_disp: str = "velo",
         select_baseline: int | None = 180,
+        random_state: int | None = None,
         verbose: bool = False,
     ) -> xr.Dataset:
         """
@@ -1348,6 +1349,7 @@ class CubeDataClass:
         :param proj: [str] [default is 'EPSG:4326'] --- EPSG of i,j projection
         :param velo_or_disp: [str] [default is 'velo'] --- 'disp' or 'velo' to indicate the type of the observations : 'disp' mean that self contain displacements values and 'velo' mean it contains velocity
         :param select_baseline: [int | None] [default is None] --- threshold of the temporal baseline to select, if the number of observation is lower than 3 times the number of estimated displacement with this threshold, it is increased by 30 days
+        :param random_state: [int | None] [default is None] --- Optional seed for reproducible separation of duplicate observation dates during smoothing
         :param verbose: [bool] [default is False] --- Print information throughout the process
 
         :return obs_filt: [xr dataset | None] --- Filtered dataset
@@ -1396,6 +1398,7 @@ class CubeDataClass:
                     t_win=t_win,
                     order=order,
                     axis=time_axis,
+                    random_state=random_state,
                 )
             elif verbose:
                 with ProgressBar():  # Plot a progress bar
@@ -1408,6 +1411,7 @@ class CubeDataClass:
                         t_win=t_win,
                         order=order,
                         axis=time_axis,
+                        random_state=random_state,
                     ).compute()
             else:
                 filtered_in_time = dask_smooth_wrapper(
@@ -1419,6 +1423,7 @@ class CubeDataClass:
                     t_win=t_win,
                     order=order,
                     axis=time_axis,
+                    random_state=random_state,
                 ).compute()
 
             if verbose:
