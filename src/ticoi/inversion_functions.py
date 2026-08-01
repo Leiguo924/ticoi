@@ -79,13 +79,25 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
 
         if len(ini) == 2:
             vv = np.array(ini[0]) ** 2 + np.array(ini[1]) ** 2
-            mu[rows, rows] = np.asarray(ini[0]) / delta_int / vv
-            mu[rows, rows + len(dates_range) - 1] = np.asarray(ini[1]) / delta_int / vv
+            with np.errstate(divide="ignore", invalid="ignore"):
+                # Preserve the historical operation order bit-for-bit for all
+                # defined rows; only sanitize direction-undefined zero speeds.
+                coef_x = np.asarray(ini[0]) / delta_int / vv
+                coef_y = np.asarray(ini[1]) / delta_int / vv
+            coef_x = np.where(np.isfinite(coef_x), coef_x, 0.0)
+            coef_y = np.where(np.isfinite(coef_y), coef_y, 0.0)
+            mu[rows, rows] = coef_x
+            mu[rows, rows + len(dates_range) - 1] = coef_y
 
         elif len(ini) == 4:
             vv = np.sqrt(ini[0] ** 2 + ini[1] ** 2) / 365 * np.sqrt(ini[2] ** 2 + ini[3] ** 2) / delta
-            mu[rows, rows] = np.asarray(ini[0]) / 365 / delta_int / vv
-            mu[rows, rows + len(dates_range) - 1] = np.asarray(ini[1]) / 365 / delta_int / vv
+            with np.errstate(divide="ignore", invalid="ignore"):
+                coef_x = np.asarray(ini[0]) / 365 / delta_int / vv
+                coef_y = np.asarray(ini[1]) / 365 / delta_int / vv
+            coef_x = np.where(np.isfinite(coef_x), coef_x, 0.0)
+            coef_y = np.where(np.isfinite(coef_y), coef_y, 0.0)
+            mu[rows, rows] = coef_x
+            mu[rows, rows + len(dates_range) - 1] = coef_y
 
     else:
         raise ValueError("Enter '1', '2','1accelnotnull', 'directionxy")
@@ -180,12 +192,23 @@ def weight_for_inversion(
     # compute the weight to put inside Tukey's biweight, if the errors are not all equal to 1
     if weight_origine and not inside_Tukey and not (data[:, pos] == 1).all():
         # Based on data quality given in confidence indicator, i.e. between 0 and 1 (1 is highest quality)
+        values = np.asarray(data[:, pos], dtype=float)
+        finite = np.isfinite(values)
         if conf:
-            Weight = data[:, pos]
+            Weight = np.where(finite, values, 0.0)
         # The data quality corresponds to errors in m/y or m/d
         # Normalization of the errors
         else:
-            Weight = 1 - (data[:, pos] - np.min(data[:, pos])) / (np.max(data[:, pos]) - np.min(data[:, pos]))
+            if not finite.any():
+                Weight = np.ones(values.shape[0], dtype=float)
+            else:
+                lower = np.min(values[finite])
+                upper = np.max(values[finite])
+                if upper == lower:
+                    Weight = np.where(finite, 1.0, 0.0)
+                else:
+                    Weight = np.zeros(values.shape[0], dtype=float)
+                    Weight[finite] = 1 - (values[finite] - lower) / (upper - lower)
 
         if temporal_decorrelation is not None:
             Weight = np.multiply(temporal_decorrelation, Weight)
@@ -860,7 +883,13 @@ def inversion_one_component(
         F = np.vstack([weighted_A, F_regu]).astype("float32")
         D = np.hstack([weighted_v, D_regu]).astype("float32")
         del weighted_A, weighted_v, condi, W
-        X = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1]))
+        optimization = opt.minimize(
+            lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1])
+        )
+        # Quasi-Newton commonly reports precision loss for this non-smooth L1
+        # objective even though it returns a finite, useful minimizer.  The old
+        # code accidentally returned the OptimizeResult object itself.
+        X = optimization.x
 
     elif solver == "LSQR":
         if linear_operator is not None:
@@ -944,7 +973,9 @@ def inversion_two_components(
     # D_regu = np.zeros(mu.shape[0])
     D_regu = np.ones(mu.shape[0]) * coef
 
-    v = np.concatenate([data[:, 2].T, data[:, 3].T])  # Concatenate vx and vy observations
+    v = np.concatenate(
+        [data[:, v_pos].T, data[:, v_pos + 1].T]
+    )  # Concatenate vx and vy observations
     condi = Weight != 0
     W = Weight[condi]
     if sparse_solver:
@@ -965,28 +996,35 @@ def inversion_two_components(
         F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
         D = np.hstack([weighted_v, D_regu]).astype("float64")
 
-        if type(ini) is not list:
+        if isinstance(ini, (list, tuple)):
             x0 = np.concatenate(ini)
-        elif ini.shape[0] == 2:
-            x0 = np.full(F.shape[1], ini[v_pos - 2], dtype="float64")
+        elif np.asarray(ini).shape[0] == 2:
+            x0 = np.repeat(np.asarray(ini), n_columns)
         else:
-            x0 = ini
+            x0 = np.asarray(ini)
         # del ini
 
         X = sp.linalg.lsmr(F, D, x0=x0)[0]
 
     elif solver == "LS":
         F = np.vstack([weighted_A, F_regu]).astype("float64")
-        D = np.hstack([weighted_v, np.zeros(mu.shape[0])]).astype("float64")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
         X = np.linalg.lstsq(F, D, rcond=None)[0]
+
+    elif solver == "L1":
+        F = np.vstack([weighted_A, F_regu]).astype("float64")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
+        X = opt.minimize(
+            lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1])
+        ).x
 
     elif solver == "LSQR" or solver == "LSQR_ini":
         F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")
-        D = np.hstack([weighted_v, np.zeros(mu.shape[0])]).astype("float64")
+        D = np.hstack([weighted_v, D_regu]).astype("float64")
         X, istop, itn, r1norm = sp.linalg.lsqr(F, D)[:4]
 
     else:
-        raise ValueError("Enter LS, LSMR, LSMR_ini, LSQR or LSQR_ini")
+        raise ValueError("Enter LS, L1, LSMR, LSMR_ini, LSQR or LSQR_ini")
 
     if show_L_curve:
         R_lcurve = F.dot(X) - D
@@ -998,15 +1036,15 @@ def inversion_two_components(
     else:
         residu_norm = None
 
-    if residu_norm is not None:
-        return X[: X.shape[0] // 2], X[X.shape[0] // 2 :], None, None
-    else:
-        return (
-            X[: X.shape[0] // 2],
-            X[X.shape[0] // 2 :],
-            residu_norm[: X.shape[0] // 2],
-            residu_norm[X.shape[0] // 2 :],
-        )
+    # Direction regularisation couples vx and vy in one system.  Its optional
+    # L-curve norm therefore describes the joint solve, not two independent
+    # component norms.
+    return (
+        X[: X.shape[0] // 2],
+        X[X.shape[0] // 2 :],
+        residu_norm,
+        residu_norm,
+    )
 
     # %% ======================================================================== #
     #                             OLD FUNCTION USED TO COMPUTE FRACTIONS OF DISPLACEMENT AS IN CHARRIER ET AL 2022 GRSL    #

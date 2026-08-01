@@ -162,15 +162,22 @@ def inversion_iteration(
                 dates_range,
                 0,
                 data,
-                solver,
                 np.concatenate([weightx, weighty]),
                 mu,
+                solver=solver,
                 coef=coef,
                 ini=np.concatenate([result_dx, result_dy]),
             )
         else:
             result_dx, result_dy, residu_normx, residu_normy = inversion_two_components(
-                A, dates_range, 0, data, solver, np.concatenate([weightx, weighty]), mu, coef=coef
+                A,
+                dates_range,
+                0,
+                data,
+                np.concatenate([weightx, weighty]),
+                mu,
+                solver=solver,
+                coef=coef,
             )
 
     elif solver == "LSMR_ini":
@@ -363,6 +370,16 @@ def inversion_core(
                 "linear_operator='fast' supports LSMR or LSMR_ini with regu='1', "
                 "regu='1accelnotnull', or regu='2'"
             )
+        if linear_operator is True and regu not in ("1", "1accelnotnull"):
+            raise ValueError(
+                "linear_operator=True is the legacy first-order operator and only "
+                "supports regu='1' or regu='1accelnotnull'; use "
+                "linear_operator='fast' for regu='2'"
+            )
+        if regu == "directionxy" and (mean is None or len(mean) != 2):
+            raise ValueError(
+                "regu='directionxy' requires mean=[mean_vx, mean_vy]"
+            )
         # Split the data, with one dtype per array
         if len(data) == 3:
             data_dates, data_values, data_str = data
@@ -470,7 +487,15 @@ def inversion_core(
         ##  Inversion
         if regu == "directionxy":
             result_dx, result_dy, residu_normx, residu_normy = inversion_two_components(
-                A, dates_range, 0, data_values, solver, np.concatenate([Weightx, Weighty]), mu, coef=coef, ini=mean_ini
+                A,
+                dates_range,
+                0,
+                data_values,
+                np.concatenate([Weightx, Weighty]),
+                mu,
+                solver=solver,
+                coef=coef,
+                ini=mean_ini,
             )
         else:
             result_dx, residu_normx = inversion_one_component(

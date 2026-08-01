@@ -12,6 +12,7 @@ from ticoi.inversion_functions import (
     inversion_one_component,
     inversion_two_components,
     mu_regularisation_sparse_first_order,
+    weight_for_inversion,
 )
 
 
@@ -732,7 +733,7 @@ class Test_inversion:
 
         monkeypatch.setattr(sp.linalg, "lsmr", verify_lsmr)
         direction_data = np.column_stack(
-            [np.zeros((len(self.data), 2)), self.data[:, 0], self.data[:, 1]]
+            [self.data[:, 0], self.data[:, 1], np.zeros((len(self.data), 2))]
         )
         inversion_two_components(
             self.A,
@@ -745,3 +746,89 @@ class Test_inversion:
             coef=3,
             show_L_curve=True,
         )
+
+    def test_error_weights_are_finite_for_constant_and_missing_quality(self):
+        constant = np.column_stack([np.zeros(4), np.zeros(4), [2.0, 2.0, np.nan, 2.0]])
+        np.testing.assert_array_equal(
+            weight_for_inversion("error", False, constant, 2),
+            [1.0, 1.0, 0.0, 1.0],
+        )
+        missing = constant.copy()
+        missing[:, 2] = np.nan
+        np.testing.assert_array_equal(
+            weight_for_inversion("error", False, missing, 2), np.ones(4)
+        )
+
+    def test_direction_regularisation_leaves_undefined_zero_speed_rows_unconstrained(self):
+        zeros = np.zeros(self.A.shape[1])
+        mu = mu_regularisation(
+            "directionxy", self.A, self.dates_range, ini=[zeros, zeros]
+        )
+        assert np.isfinite(mu).all()
+        assert not mu.any()
+
+    @pytest.mark.parametrize("solver", ["LSMR", "LSMR_ini"])
+    @pytest.mark.parametrize("iteration", [False, True])
+    def test_directionxy_runs_through_public_core(self, solver, iteration):
+        baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        values = np.column_stack(
+            [self.data, np.ones((len(self.data), 2)), baseline]
+        )
+        result = inversion_core(
+            [self.dates.copy(), values], 0, 0,
+            dates_range=self.dates_range,
+            solver=solver,
+            regu="directionxy",
+            coef=1,
+            iteration=iteration,
+            mean=[np.ones(self.A.shape[1]), np.ones(self.A.shape[1])],
+        )[1]
+        assert result is not None
+        assert np.isfinite(result[["result_dx", "result_dy"]].to_numpy()).all()
+
+    @pytest.mark.parametrize("solver", ["LS", "LSQR", "L1"])
+    def test_directionxy_supports_other_public_solvers(self, solver):
+        baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        values = np.column_stack(
+            [self.data, np.ones((len(self.data), 2)), baseline]
+        )
+        result = inversion_core(
+            [self.dates.copy(), values], 0, 0,
+            dates_range=self.dates_range, solver=solver,
+            regu="directionxy", coef=1, iteration=False,
+            mean=[np.ones(self.A.shape[1]), np.ones(self.A.shape[1])],
+        )[1]
+        assert result is not None
+        assert np.isfinite(result[["result_dx", "result_dy"]].to_numpy()).all()
+
+    def test_l1_runs_through_public_core(self):
+        baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        values = np.column_stack(
+            [self.data, np.ones((len(self.data), 2)), baseline]
+        )
+        result = inversion_core(
+            [self.dates.copy(), values], 0, 0,
+            dates_range=self.dates_range, solver="L1", regu="1", coef=1,
+        )[1]
+        assert result is not None
+        assert np.isfinite(result[["result_dx", "result_dy"]].to_numpy()).all()
+
+    def test_legacy_linear_operator_rejects_second_order_regularisation(self):
+        baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        values = np.column_stack(
+            [self.data, np.ones((len(self.data), 2)), baseline]
+        )
+        with pytest.raises(ValueError, match="legacy first-order operator"):
+            inversion_core(
+                [self.dates.copy(), values], 0, 0,
+                dates_range=self.dates_range, solver="LSMR", regu="2",
+                linear_operator=True,
+            )
