@@ -795,6 +795,10 @@ def inversion_one_component(
             istop = int(lsmr_result[1])
             stop_counts = diagnostics.setdefault("lsmr_stop_counts", {})
             stop_counts[istop] = stop_counts.get(istop, 0) + 1
+            if istop == 7:
+                diagnostics["lsmr_limit_hits"] = (
+                    diagnostics.get("lsmr_limit_hits", 0) + 1
+                )
 
     elif solver == "LSMR_ini":  # 50ms
         if ini is None:
@@ -841,6 +845,10 @@ def inversion_one_component(
             istop = int(lsmr_result[1])
             stop_counts = diagnostics.setdefault("lsmr_stop_counts", {})
             stop_counts[istop] = stop_counts.get(istop, 0) + 1
+            if istop == 7:
+                diagnostics["lsmr_limit_hits"] = (
+                    diagnostics.get("lsmr_limit_hits", 0) + 1
+                )
 
     elif solver == "LS":  # 136 ms ± 6.48 ms per loop (mean ± std. dev. of 7 runs, 10 loops each) #time consuming
         F = np.vstack([weighted_A, F_regu]).astype("float32")

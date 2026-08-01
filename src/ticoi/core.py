@@ -311,6 +311,7 @@ def inversion_core(
     verbose: bool = False,
     diagnostics: dict | None = None,
     reuse_observation_csc: bool = True,
+    fast_fallback_on_limit: bool = True,
 ) -> (np.ndarray, pd.DataFrame, pd.DataFrame):  # type: ignore
     """
     Computes A in AX = Y and does the inversion using a given solver and regularization.
@@ -328,12 +329,13 @@ def inversion_core(
     :param conf: [bool] [default is False] --- If True means that the error corresponds to confidence intervals between 0 and 1, otherwise it corresponds to errors in m/y or m/d
     :param mean: [list | None] [default is None] --- Apriori on the average
     :param detect_temporal_decorrelation: [bool] [default is True] --- If True the first inversion is solved using only velocity observations with small temporal baselines, to detect temporal decorelation
-    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR with first- or second-order regularization, or LSMR_ini with first-order, non-zero-acceleration first-order, or second-order regularization. LSMR without an initial estimate and regu="1accelnotnull" automatically uses the explicit CSC path because robust reweighting amplifies LinearOperator round-off for that ill-conditioned combination.
+    :param linear_operator: [bool | "fast"] [default is False] --- If True, use the legacy linear operator. If "fast", use the equivalent interval-prefix operator for LSMR or LSMR_ini with first-order, non-zero-acceleration first-order, or second-order regularization.
     :param result_quality: [list | str | None] [default is None] --- List which can contain 'Norm_residual' to determine the L2 norm of the residuals from the last inversion, 'X_contribution' to determine the number of Y observations which have contributed to estimate each value in X (it corresponds to A.dot(weight))
     :param nb_max_iteration: [int] [default is 10] --- Maximum number of iterations
     :param apriori_weight_in_second_iteration: [bool] [default is False] --- it True use the error to weight each of the iterations, if not use it only in the first iteration
     :param visual: [bool] [default is True] --- Keep the weights for future plots
     :param verbose: [bool] [default is False] --- Print information along the way
+    :param fast_fallback_on_limit: [bool] [default is True] --- If a fast LSMR solve reaches its iteration limit, recompute only that pixel with the historical explicit CSC path. This preserves numerical compatibility while keeping converged pixels on the fast operator.
 
     :return A: [np array | None] --- Design matrix in AX = Y
     :return result: [pd dataframe | None] --- DF with dates, computed displacements and number of observations used to compute each displacement
@@ -341,6 +343,16 @@ def inversion_core(
     """
 
     if data[0].size:  # If there are available data on this pixel
+        pixel_i, pixel_j = i, j
+        fast_requested = linear_operator == "fast"
+        fallback_data = None
+        if fast_requested and fast_fallback_on_limit:
+            # Later trimming only rebinds local arrays; inversion never mutates
+            # the caller's observation arrays.  Preserve shallow references so
+            # the common converged fast path adds no full-pixel copy.
+            fallback_data = list(data)
+            if diagnostics is None:
+                diagnostics = {}
         fast_supported = solver in ("LSMR", "LSMR_ini") and regu in (
             "1",
             "1accelnotnull",
@@ -351,21 +363,6 @@ def inversion_core(
                 "linear_operator='fast' supports LSMR or LSMR_ini with regu='1', "
                 "regu='1accelnotnull', or regu='2'"
             )
-        # With a non-zero acceleration prior but no initial estimate, every
-        # production-size LSMR solve commonly reaches its iteration limit.  The
-        # mathematically equivalent interval operator then follows a slightly
-        # different floating-point trajectory from SciPy's explicit CSC
-        # matrix.  Tukey reweighting can amplify that round-off to percent-level
-        # output changes.  Preserve the historical result for this one unstable
-        # combination; LSMR_ini (the production path) remains accelerated.
-        if (
-            linear_operator == "fast"
-            and solver == "LSMR"
-            and regu == "1accelnotnull"
-        ):
-            linear_operator = False
-            if diagnostics is not None:
-                diagnostics["fast_operator_fallback"] = "LSMR+1accelnotnull"
         # Split the data, with one dtype per array
         if len(data) == 3:
             data_dates, data_values, data_str = data
@@ -620,6 +617,62 @@ def inversion_core(
                 diagnostics["robust_solve_rounds"] = 1
             result_dy_i = result_dy
             result_dx_i = result_dx
+
+        if (
+            fast_requested
+            and fast_fallback_on_limit
+            and diagnostics.get("lsmr_limit_hits", 0) > 0
+        ):
+            fast_diagnostics = dict(diagnostics)
+            fallback_diagnostics = {}
+            fallback_result = inversion_core(
+                fallback_data,
+                pixel_i,
+                pixel_j,
+                dates_range=dates_range,
+                solver=solver,
+                regu=regu,
+                coef=coef,
+                apriori_weight=apriori_weight,
+                iteration=iteration,
+                threshold_it=threshold_it,
+                unit=unit,
+                conf=conf,
+                mean=mean,
+                detect_temporal_decorrelation=detect_temporal_decorrelation,
+                linear_operator=False,
+                result_quality=result_quality,
+                nb_max_iteration=nb_max_iteration,
+                apriori_weight_in_second_iteration=apriori_weight_in_second_iteration,
+                visual=visual,
+                verbose=verbose,
+                diagnostics=fallback_diagnostics,
+                reuse_observation_csc=reuse_observation_csc,
+                fast_fallback_on_limit=False,
+            )
+            additive = (
+                "lsmr_calls",
+                "lsmr_iterations",
+                "lsmr_limit_hits",
+                "sparse_prep_seconds",
+                "lsmr_seconds",
+            )
+            diagnostics.clear()
+            diagnostics.update(fallback_diagnostics)
+            for name in additive:
+                diagnostics[name] = (
+                    fallback_diagnostics.get(name, 0)
+                    + fast_diagnostics.get(name, 0)
+                )
+            diagnostics["lsmr_max_iterations"] = max(
+                fallback_diagnostics.get("lsmr_max_iterations", 0),
+                fast_diagnostics.get("lsmr_max_iterations", 0),
+            )
+            diagnostics["fast_operator_fallbacks"] = 1
+            diagnostics["discarded_fast_lsmr_calls"] = fast_diagnostics.get(
+                "lsmr_calls", 0
+            )
+            return fallback_result
 
         if np.isnan(result_dx_i).all():  # no results
             return None, None, None

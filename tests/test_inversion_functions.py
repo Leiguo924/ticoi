@@ -530,13 +530,11 @@ class Test_inversion:
         explicit = inversion_core(
             [self.dates.copy(), data_values.copy()], 0, 0, **kwargs
         )[1]
-        fast_diagnostics = {}
         fast = inversion_core(
             [self.dates.copy(), data_values.copy()],
             0,
             0,
             linear_operator="fast",
-            diagnostics=fast_diagnostics,
             **kwargs,
         )[1]
 
@@ -549,13 +547,69 @@ class Test_inversion:
             rtol=tolerance,
             atol=tolerance,
         )
-        if solver == "LSMR" and regu == "1accelnotnull":
-            assert (
-                fast_diagnostics["fast_operator_fallback"]
-                == "LSMR+1accelnotnull"
-            )
-        else:
-            assert "fast_operator_fallback" not in fast_diagnostics
+
+    def test_fast_iteration_limit_retries_explicit_path(self, monkeypatch):
+        temporal_baseline = (
+            (self.dates[:, 1] - self.dates[:, 0]) / np.timedelta64(1, "D")
+        )
+        data_values = np.column_stack(
+            [
+                self.data,
+                np.full((self.data.shape[0], 2), 2.0),
+                temporal_baseline,
+            ]
+        )
+        kwargs = dict(
+            dates_range=self.dates_range,
+            solver="LSMR_ini",
+            regu="1accelnotnull",
+            coef=100,
+            iteration=True,
+            detect_temporal_decorrelation=False,
+            result_quality=["X_contribution"],
+            mean=[
+                np.zeros(self.A.shape[1]),
+                np.zeros(self.A.shape[1]),
+            ],
+        )
+        explicit = inversion_core(
+            [self.dates.copy(), data_values.copy()], 0, 0, **kwargs
+        )[1]
+        original_lsmr = sp.linalg.lsmr
+
+        def force_iteration_limit(*args, **solver_kwargs):
+            result = list(original_lsmr(*args, **solver_kwargs))
+            result[1] = 7
+            return tuple(result)
+
+        monkeypatch.setattr(sp.linalg, "lsmr", force_iteration_limit)
+        unchecked_diagnostics = {}
+        inversion_core(
+            [self.dates.copy(), data_values.copy()],
+            0,
+            0,
+            linear_operator="fast",
+            fast_fallback_on_limit=False,
+            diagnostics=unchecked_diagnostics,
+            **kwargs,
+        )
+        assert unchecked_diagnostics["lsmr_limit_hits"] > 0
+        assert "fast_operator_fallbacks" not in unchecked_diagnostics
+
+        diagnostics = {}
+        fast = inversion_core(
+            [self.dates.copy(), data_values.copy()],
+            0,
+            0,
+            linear_operator="fast",
+            diagnostics=diagnostics,
+            **kwargs,
+        )[1]
+
+        assert fast.equals(explicit)
+        assert diagnostics["fast_operator_fallbacks"] == 1
+        assert diagnostics["discarded_fast_lsmr_calls"] > 0
+        assert diagnostics["lsmr_limit_hits"] > 0
 
     @pytest.mark.parametrize(
         "solver, regu",
