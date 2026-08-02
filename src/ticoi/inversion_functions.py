@@ -585,6 +585,8 @@ class class_fast_linear_operator(class_linear_operator):
     the legacy operator's floating-point evaluation order untouched.
     """
 
+    lsmr_maxiter_factor = 2.0
+
     def matvecregu1(self, X):
         Y = np.zeros(len(self.identification_obs) + len(X) - 1)
         return fast_matvecregu1_numba(
@@ -803,7 +805,12 @@ def inversion_one_component(
                 "sparse_prep_seconds", 0.0
             ) + (time.perf_counter() - sparse_prep_t0)
         solve_t0 = time.perf_counter()
-        lsmr_result = sp.linalg.lsmr(F, D)
+        lsmr_kwargs = {}
+        if isinstance(linear_operator, class_fast_linear_operator):
+            lsmr_kwargs["maxiter"] = int(
+                np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape))
+            )
+        lsmr_result = sp.linalg.lsmr(F, D, **lsmr_kwargs)
         if diagnostics is not None:
             diagnostics["lsmr_seconds"] = diagnostics.get(
                 "lsmr_seconds", 0.0
@@ -853,7 +860,10 @@ def inversion_one_component(
             solve_t0 = time.perf_counter()
             F = A_l
             D = np.concatenate([linear_operator.Weight * v, D_regu])
-            lsmr_result = sp.linalg.lsmr(F, D, x0=x0)
+            maxiter = int(
+                np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape))
+            ) if isinstance(linear_operator, class_fast_linear_operator) else None
+            lsmr_result = sp.linalg.lsmr(F, D, x0=x0, maxiter=maxiter)
         if diagnostics is not None:
             diagnostics["lsmr_seconds"] = diagnostics.get(
                 "lsmr_seconds", 0.0

@@ -319,6 +319,7 @@ def inversion_core(
     diagnostics: dict | None = None,
     reuse_observation_csc: bool = True,
     fast_fallback_on_limit: bool = True,
+    fast_lsmr_maxiter_factor: float = 2.0,
 ) -> (np.ndarray, pd.DataFrame, pd.DataFrame):  # type: ignore
     """
     Computes A in AX = Y and does the inversion using a given solver and regularization.
@@ -343,6 +344,7 @@ def inversion_core(
     :param visual: [bool] [default is True] --- Keep the weights for future plots
     :param verbose: [bool] [default is False] --- Print information along the way
     :param fast_fallback_on_limit: [bool] [default is True] --- If a fast LSMR solve reaches its iteration limit, recompute only that pixel with the historical explicit CSC path. This preserves numerical compatibility while keeping converged pixels on the fast operator.
+    :param fast_lsmr_maxiter_factor: [float] [default is 2.0] --- Multiply SciPy's default min(m, n) LSMR iteration budget on the fast operator. Normally converged calls stop at the same iteration; only calls that would hit the default limit continue before strict fallback.
 
     :return A: [np array | None] --- Design matrix in AX = Y
     :return result: [pd dataframe | None] --- DF with dates, computed displacements and number of observations used to compute each displacement
@@ -403,6 +405,12 @@ def inversion_core(
             linear_operator.load(
                 find_date_obs(data_dates[:, :2], dates_range), dates_range, coef
             )  # load parameter of the linear operator
+            if isinstance(linear_operator, class_fast_linear_operator):
+                if fast_lsmr_maxiter_factor < 1:
+                    raise ValueError("fast_lsmr_maxiter_factor must be >= 1")
+                linear_operator.lsmr_maxiter_factor = float(
+                    fast_lsmr_maxiter_factor
+                )
             A = sp.linalg.LinearOperator(
                 (data_values.shape[0], len(dates_range) - 1),
                 matvec=linear_operator.matvec,
@@ -674,6 +682,7 @@ def inversion_core(
                 diagnostics=fallback_diagnostics,
                 reuse_observation_csc=reuse_observation_csc,
                 fast_fallback_on_limit=False,
+                fast_lsmr_maxiter_factor=fast_lsmr_maxiter_factor,
             )
             additive = (
                 "lsmr_calls",

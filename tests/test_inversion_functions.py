@@ -577,8 +577,12 @@ class Test_inversion:
             [self.dates.copy(), data_values.copy()], 0, 0, **kwargs
         )[1]
         original_lsmr = sp.linalg.lsmr
+        observed_maxiters = []
 
         def force_iteration_limit(*args, **solver_kwargs):
+            observed_maxiters.append(
+                (min(args[0].shape), solver_kwargs.get("maxiter"))
+            )
             result = list(original_lsmr(*args, **solver_kwargs))
             result[1] = 7
             return tuple(result)
@@ -611,6 +615,13 @@ class Test_inversion:
         assert diagnostics["fast_operator_fallbacks"] == 1
         assert diagnostics["discarded_fast_lsmr_calls"] > 0
         assert diagnostics["lsmr_limit_hits"] > 0
+        fast_budgets = [
+            (default, maximum) for default, maximum in observed_maxiters
+            if maximum is not None
+        ]
+        assert fast_budgets
+        assert all(maximum == 2 * default
+                   for default, maximum in fast_budgets)
 
     @pytest.mark.parametrize(
         "solver, regu",
