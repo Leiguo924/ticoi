@@ -6,6 +6,7 @@ import pytest
 import xarray as xr
 from dask import delayed
 
+import ticoi.cube_data_classxr as cube_data_module
 from ticoi.cube_data_classxr import (
     CubeDataClass,  # Assuming cube_data_class is defined in your_module
     _unique_valid_dates,
@@ -66,6 +67,36 @@ def test_load_pixel_materializes_lazy_variables_in_one_compute(monkeypatch):
 
     np.testing.assert_array_equal(data[0], np.column_stack((dates, dates + 1)))
     assert calls == 1
+
+
+def test_filter_expands_baseline_selection_when_initial_threshold_has_no_observations(monkeypatch):
+    date1 = np.array(["2020-01-01"] * 3 + ["2020-01-02"] * 3 + ["2020-01-03"] * 3, dtype="datetime64[ns]")
+    date2 = np.array(["2020-01-02"] * 3 + ["2020-01-03"] * 3 + ["2020-01-01"] * 3, dtype="datetime64[ns]")
+    mid_date = date1 + (date2 - date1) // 2
+    cube = CubeDataClass()
+    cube.ds = xr.Dataset(
+        {
+            "date1": ("mid_date", date1),
+            "date2": ("mid_date", date2),
+            "vx": (("mid_date", "y", "x"), np.ones((9, 1, 1))),
+            "vy": (("mid_date", "y", "x"), np.ones((9, 1, 1))),
+            "temporal_baseline": ("mid_date", np.full(9, 200.0)),
+        },
+        coords={"mid_date": mid_date, "x": [0], "y": [0]},
+        attrs={"proj4": "EPSG:3413"},
+    )
+    selected_counts = []
+
+    def record_selected_observations(array, dates, t_out, **kwargs):
+        selected_counts.append(len(dates))
+        return np.zeros((len(t_out), array.shape[1], array.shape[2]), dtype=array.dtype)
+
+    monkeypatch.setattr(cube_data_module, "numpy_smooth_wrapper", record_selected_observations)
+
+    result, _ = cube.filter_cube_before_inversion(select_baseline=100, smooth_method="gaussian")
+
+    assert selected_counts == [9, 9]
+    assert result.sizes["mid_date"] == 2
 from ticoi.example import get_path
 
 

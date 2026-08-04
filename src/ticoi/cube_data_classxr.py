@@ -1504,7 +1504,7 @@ class CubeDataClass:
                 # temporal-baseline array may otherwise be read from storage twice.
                 baseline = self.ds["temporal_baseline"].compute()
                 baseline_idx = np.where(baseline < select_baseline)[0]
-                while len(baseline_idx) < 3 * (len(date_range) - 1) & (select_baseline < 500):
+                while len(baseline_idx) < 3 * (len(date_range) - 1) and select_baseline < 500:
                     select_baseline += 30
                     baseline_idx = np.where(baseline < select_baseline)[0]
 
