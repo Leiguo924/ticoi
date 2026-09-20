@@ -79,15 +79,21 @@ with `pip install -e .`, then try the small, offline example:
 
 ```bash
 python examples/basic/config/create_demo_cube.py
-ticoi show-config examples/basic/config/cube.json > resolved-config.json
+ticoi show-config examples/basic/config/config.json > resolved-config.json
 ticoi run resolved-config.json
 ```
 
-The [example configuration](examples/basic/config/cube.json) processes a 2×2
+The [complete configuration](examples/basic/config/config.json) explicitly lists
+every supported option in all four sections. It processes a 2×2
 synthetic cube and writes `examples/results/config_demo/demo_velocity.nc`.
 Its interior velocities are `vx=[[120, 130], [140, 150]]`, `vy=-35` m/year;
 unsupported boundary intervals remain NaN, not extrapolated velocities.
 The generator requires no external data or autoRIFT installation.
+For your own data, edit this JSON's input/output paths, projection and processing
+settings; the synthetic-data generator is only needed for the offline demo.
+The example disables iteration, prior weighting and temporal decorrelation to
+keep the synthetic calculation simple; these are not universal recommendations
+for scientific data. `inversion.path_save: null` inherits the top-level `output`.
 
 Required keys are `input` (NetCDF/Zarr path, or a list of cubes) and `output`
 (local directory). Optional `filename` is the output stem. Four dictionaries

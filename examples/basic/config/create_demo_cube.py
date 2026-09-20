@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Create a tiny, noiseless velocity cube for the adjacent cube.json example.
+"""Create a tiny, noiseless velocity cube for the adjacent config.json example.
 
-Run this script, then ``ticoi run examples/basic/config/cube.json`` from the
+Run this script, then ``ticoi run examples/basic/config/config.json`` from the
 repository root. No downloads or autoRIFT installation are required.
 The four pixels move at vx=[[120, 130], [140, 150]] and vy=-35 m/year.
 """
