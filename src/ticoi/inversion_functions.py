@@ -105,9 +105,7 @@ def mu_regularisation(regu: Regu, A: np.ndarray, dates_range: np.ndarray, ini: n
     return mu
 
 
-def mu_regularisation_sparse_first_order(
-    n_columns: int, dates_range: np.ndarray
-) -> sp.csc_matrix:
+def mu_regularisation_sparse_first_order(n_columns: int, dates_range: np.ndarray) -> sp.csc_matrix:
     """Build the first-order regularisation directly in its sparse form.
 
     This is numerically identical to ``mu_regularisation`` for ``"1"`` and
@@ -116,15 +114,9 @@ def mu_regularisation_sparse_first_order(
     """
     delta = np.diff(dates_range) / np.timedelta64(1, "D")
     rows = np.repeat(np.arange(n_columns - 1), 2)
-    columns = np.column_stack(
-        (np.arange(n_columns - 1), np.arange(1, n_columns))
-    ).ravel()
-    values = np.column_stack(
-        (-1 / delta[:-1], 1 / delta[1:])
-    ).astype("float32", copy=False).ravel()
-    return sp.csc_matrix(
-        (values, (rows, columns)), shape=(n_columns - 1, n_columns)
-    )
+    columns = np.column_stack((np.arange(n_columns - 1), np.arange(1, n_columns))).ravel()
+    values = np.column_stack((-1 / delta[:-1], 1 / delta[1:])).astype("float32", copy=False).ravel()
+    return sp.csc_matrix((values, (rows, columns)), shape=(n_columns - 1, n_columns))
 
 
 def construction_dates_range_np(data: np.ndarray) -> np.ndarray:
@@ -343,10 +335,7 @@ def fast_matvecregu1_numba(
     for j in range(len(X)):
         prefix[j + 1] = prefix[j] + X[j]
     for j in range(len(identification_obs)):
-        Y[j] = (
-            prefix[identification_obs[j][1] + 1]
-            - prefix[identification_obs[j][0]]
-        ) * weight[j]
+        Y[j] = (prefix[identification_obs[j][1] + 1] - prefix[identification_obs[j][0]]) * weight[j]
     for j in range(len(X) - 1):
         left = np.float32(-1.0 / delta[j]) * np.float32(coef)
         right = np.float32(1.0 / delta[j + 1]) * np.float32(coef)
@@ -361,10 +350,7 @@ def fast_matvec_numba(X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarr
     for j in range(len(X)):
         prefix[j + 1] = prefix[j] + X[j]
     for j in range(len(identification_obs)):
-        Y[j] = (
-            prefix[identification_obs[j][1] + 1]
-            - prefix[identification_obs[j][0]]
-        )
+        Y[j] = prefix[identification_obs[j][1] + 1] - prefix[identification_obs[j][0]]
     return Y
 
 
@@ -386,33 +372,23 @@ def fast_rmatvecregu1_numba(X, Y, identification_obs, coef, delta, weight):
             upper = np.float32(1.0 / delta[j]) * np.float32(coef)
             diagonal = np.float32(-1.0 / delta[j]) * np.float32(coef)
             X[j] += upper * Y[n_obs + j - 1] + diagonal * Y[n_obs + j]
-        X[len(X) - 1] += (
-            np.float32(1.0 / delta[len(X) - 1]) * np.float32(coef)
-        ) * Y[n_obs + len(X) - 2]
+        X[len(X) - 1] += (np.float32(1.0 / delta[len(X) - 1]) * np.float32(coef)) * Y[n_obs + len(X) - 2]
     return X
 
 
 @jit(nopython=True, cache=True)
 def fast_matvecregu2_numba(
-    X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray,
-    delta: np.ndarray, coef: int, weight: np.ndarray
+    X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray, delta: np.ndarray, coef: int, weight: np.ndarray
 ):
     prefix = np.empty(len(X) + 1, dtype=np.float64)
     prefix[0] = 0.0
     for j in range(len(X)):
         prefix[j + 1] = prefix[j] + X[j]
     for j in range(len(identification_obs)):
-        Y[j] = (
-            prefix[identification_obs[j][1] + 1]
-            - prefix[identification_obs[j][0]]
-        ) * weight[j]
+        Y[j] = (prefix[identification_obs[j][1] + 1] - prefix[identification_obs[j][0]]) * weight[j]
     offset = len(identification_obs)
     for j in range(1, len(X) - 1):
-        Y[offset + j] = coef * (
-            X[j - 1] / delta[j - 1]
-            - 2.0 * X[j] / delta[j]
-            + X[j + 1] / delta[j + 1]
-        )
+        Y[offset + j] = coef * (X[j - 1] / delta[j - 1] - 2.0 * X[j] / delta[j] + X[j + 1] / delta[j + 1])
     return Y
 
 
@@ -453,16 +429,11 @@ def fast_rmatvecA_numba(X, Y, identification_obs):
 # callers that explicitly request ``linear_operator=True``.
 @jit(nopython=True, cache=True)
 def matvecregu1_numba(
-    X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray,
-    delta: np.ndarray, coef: int, weight: np.ndarray
+    X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray, delta: np.ndarray, coef: int, weight: np.ndarray
 ):
     for j in range(len(identification_obs)):
-        Y[j] = np.sum(
-            X[identification_obs[j][0] : identification_obs[j][1] + 1]
-        ) * weight[j]
-    Y[len(identification_obs) : len(identification_obs) + len(X) - 1] = (
-        np.diff(X / delta) * coef
-    )
+        Y[j] = np.sum(X[identification_obs[j][0] : identification_obs[j][1] + 1]) * weight[j]
+    Y[len(identification_obs) : len(identification_obs) + len(X) - 1] = np.diff(X / delta) * coef
     return Y
 
 
@@ -476,20 +447,14 @@ def matvec_numba(X: np.ndarray, Y: np.ndarray, identification_obs: np.ndarray):
 @jit(nopython=True, cache=True)
 def rmatvecregu1_numba(X, Y, identification_obs, coef, delta, weight):
     for j in range(len(identification_obs)):
-        X[identification_obs[j][0] : identification_obs[j][1] + 1] += (
-            Y[j] * weight[j]
-        )
+        X[identification_obs[j][0] : identification_obs[j][1] + 1] += Y[j] * weight[j]
     X[0] -= Y[len(identification_obs)] / delta[0] * coef
     for j in range(
         len(identification_obs) + 1,
         len(identification_obs) + len(X) - 1,
     ):
-        X[j - len(identification_obs)] += (
-            (Y[j - 1] - Y[j]) / delta[j - len(identification_obs)] * coef
-        )
-    X[len(X) - 1] += (
-        Y[len(identification_obs) + len(X) - 2] / delta[len(X) - 1] * coef
-    )
+        X[j - len(identification_obs)] += (Y[j - 1] - Y[j]) / delta[j - len(identification_obs)] * coef
+    X[len(X) - 1] += Y[len(identification_obs) + len(X) - 2] / delta[len(X) - 1] * coef
     return X
 
 
@@ -637,9 +602,7 @@ class class_fast_linear_operator(class_linear_operator):
 
     def rmatvec(self, Y):
         X = np.zeros(self.X_length)
-        return fast_rmatvecA_numba(
-            X, Y, self.identification_obs_original
-        )
+        return fast_rmatvecA_numba(X, Y, self.identification_obs_original)
 
     def matvec_direct(self, X):
         """Evaluate observation intervals in the legacy summation order.
@@ -748,9 +711,7 @@ def inversion_one_component(
     if regu == "1accelnotnull":  # Apriori on the acceleration
         D_regu = np.multiply(accel[v_pos - 2], coef)
     elif linear_operator is not None:
-        n_regu_rows = (
-            len(dates_range) - 1 if regu == "2" else len(dates_range) - 2
-        )
+        n_regu_rows = len(dates_range) - 1 if regu == "2" else len(dates_range) - 2
         D_regu = np.zeros(n_regu_rows)
     else:
         D_regu = np.zeros(mu.shape[0])
@@ -758,11 +719,7 @@ def inversion_one_component(
     sparse_prep_t0 = time.perf_counter() if solver in ("LSMR", "LSMR_ini") else None
 
     if linear_operator is None:
-        F_regu = (
-            None
-            if F_regu_csc is not None and solver in ("LSMR", "LSMR_ini")
-            else np.multiply(coef, mu)
-        )
+        F_regu = None if F_regu_csc is not None and solver in ("LSMR", "LSMR_ini") else np.multiply(coef, mu)
         condi = Weight != 0
         W = Weight[condi]
         if solver in ("LSMR", "LSMR_ini"):
@@ -801,34 +758,26 @@ def inversion_one_component(
             F = A_l
             D = np.concatenate([linear_operator.Weight * v, D_regu])
         if diagnostics is not None:
-            diagnostics["sparse_prep_seconds"] = diagnostics.get(
-                "sparse_prep_seconds", 0.0
-            ) + (time.perf_counter() - sparse_prep_t0)
+            diagnostics["sparse_prep_seconds"] = diagnostics.get("sparse_prep_seconds", 0.0) + (
+                time.perf_counter() - sparse_prep_t0
+            )
         solve_t0 = time.perf_counter()
         lsmr_kwargs = {}
         if isinstance(linear_operator, class_fast_linear_operator):
-            lsmr_kwargs["maxiter"] = int(
-                np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape))
-            )
+            lsmr_kwargs["maxiter"] = int(np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape)))
         lsmr_result = sp.linalg.lsmr(F, D, **lsmr_kwargs)
         if diagnostics is not None:
-            diagnostics["lsmr_seconds"] = diagnostics.get(
-                "lsmr_seconds", 0.0
-            ) + (time.perf_counter() - solve_t0)
+            diagnostics["lsmr_seconds"] = diagnostics.get("lsmr_seconds", 0.0) + (time.perf_counter() - solve_t0)
         X = lsmr_result[0]
         if diagnostics is not None:
             diagnostics["lsmr_calls"] = diagnostics.get("lsmr_calls", 0) + 1
-            diagnostics["lsmr_iterations"] = (
-                diagnostics.get("lsmr_iterations", 0) + int(lsmr_result[2]))
-            diagnostics["lsmr_max_iterations"] = max(
-                diagnostics.get("lsmr_max_iterations", 0), int(lsmr_result[2]))
+            diagnostics["lsmr_iterations"] = diagnostics.get("lsmr_iterations", 0) + int(lsmr_result[2])
+            diagnostics["lsmr_max_iterations"] = max(diagnostics.get("lsmr_max_iterations", 0), int(lsmr_result[2]))
             istop = int(lsmr_result[1])
             stop_counts = diagnostics.setdefault("lsmr_stop_counts", {})
             stop_counts[istop] = stop_counts.get(istop, 0) + 1
             if istop == 7:
-                diagnostics["lsmr_limit_hits"] = (
-                    diagnostics.get("lsmr_limit_hits", 0) + 1
-                )
+                diagnostics["lsmr_limit_hits"] = diagnostics.get("lsmr_limit_hits", 0) + 1
 
     elif solver == "LSMR_ini":  # 50ms
         if ini is None:
@@ -851,37 +800,33 @@ def inversion_one_component(
         # 24 ms ± 419 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
         if not linear_operator:
             if diagnostics is not None:
-                diagnostics["sparse_prep_seconds"] = diagnostics.get(
-                    "sparse_prep_seconds", 0.0
-                ) + (time.perf_counter() - sparse_prep_t0)
+                diagnostics["sparse_prep_seconds"] = diagnostics.get("sparse_prep_seconds", 0.0) + (
+                    time.perf_counter() - sparse_prep_t0
+                )
             solve_t0 = time.perf_counter()
             lsmr_result = sp.linalg.lsmr(F, D, x0=x0)
         else:
             solve_t0 = time.perf_counter()
             F = A_l
             D = np.concatenate([linear_operator.Weight * v, D_regu])
-            maxiter = int(
-                np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape))
-            ) if isinstance(linear_operator, class_fast_linear_operator) else None
+            maxiter = (
+                int(np.ceil(linear_operator.lsmr_maxiter_factor * min(F.shape)))
+                if isinstance(linear_operator, class_fast_linear_operator)
+                else None
+            )
             lsmr_result = sp.linalg.lsmr(F, D, x0=x0, maxiter=maxiter)
         if diagnostics is not None:
-            diagnostics["lsmr_seconds"] = diagnostics.get(
-                "lsmr_seconds", 0.0
-            ) + (time.perf_counter() - solve_t0)
+            diagnostics["lsmr_seconds"] = diagnostics.get("lsmr_seconds", 0.0) + (time.perf_counter() - solve_t0)
         X = lsmr_result[0]
         if diagnostics is not None:
             diagnostics["lsmr_calls"] = diagnostics.get("lsmr_calls", 0) + 1
-            diagnostics["lsmr_iterations"] = (
-                diagnostics.get("lsmr_iterations", 0) + int(lsmr_result[2]))
-            diagnostics["lsmr_max_iterations"] = max(
-                diagnostics.get("lsmr_max_iterations", 0), int(lsmr_result[2]))
+            diagnostics["lsmr_iterations"] = diagnostics.get("lsmr_iterations", 0) + int(lsmr_result[2])
+            diagnostics["lsmr_max_iterations"] = max(diagnostics.get("lsmr_max_iterations", 0), int(lsmr_result[2]))
             istop = int(lsmr_result[1])
             stop_counts = diagnostics.setdefault("lsmr_stop_counts", {})
             stop_counts[istop] = stop_counts.get(istop, 0) + 1
             if istop == 7:
-                diagnostics["lsmr_limit_hits"] = (
-                    diagnostics.get("lsmr_limit_hits", 0) + 1
-                )
+                diagnostics["lsmr_limit_hits"] = diagnostics.get("lsmr_limit_hits", 0) + 1
 
     elif solver == "LS":  # 136 ms ± 6.48 ms per loop (mean ± std. dev. of 7 runs, 10 loops each) #time consuming
         F = np.vstack([weighted_A, F_regu]).astype("float32")
@@ -893,9 +838,7 @@ def inversion_one_component(
         F = np.vstack([weighted_A, F_regu]).astype("float32")
         D = np.hstack([weighted_v, D_regu]).astype("float32")
         del weighted_A, weighted_v, condi, W
-        optimization = opt.minimize(
-            lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1])
-        )
+        optimization = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1]))
         # Quasi-Newton commonly reports precision loss for this non-smooth L1
         # objective even though it returns a finite, useful minimizer.  The old
         # code accidentally returned the OptimizeResult object itself.
@@ -983,9 +926,7 @@ def inversion_two_components(
     # D_regu = np.zeros(mu.shape[0])
     D_regu = np.ones(mu.shape[0]) * coef
 
-    v = np.concatenate(
-        [data[:, v_pos].T, data[:, v_pos + 1].T]
-    )  # Concatenate vx and vy observations
+    v = np.concatenate([data[:, v_pos].T, data[:, v_pos + 1].T])  # Concatenate vx and vy observations
     condi = Weight != 0
     W = Weight[condi]
     if sparse_solver:
@@ -1024,9 +965,7 @@ def inversion_two_components(
     elif solver == "L1":
         F = np.vstack([weighted_A, F_regu]).astype("float64")
         D = np.hstack([weighted_v, D_regu]).astype("float64")
-        X = opt.minimize(
-            lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1])
-        ).x
+        X = opt.minimize(lambda x: la.norm(D - F @ x, ord=1), np.zeros(F.shape[1])).x
 
     elif solver == "LSQR" or solver == "LSQR_ini":
         F = sp.vstack([weighted_A, sp.csc_matrix(F_regu)], format="csc")

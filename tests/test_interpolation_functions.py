@@ -22,13 +22,16 @@ def _baseline_reconstruct_common_ref(result, second_date_list=None):
             }
         )
 
-    data = pd.DataFrame(
-        {"Ref_date": result["date1"][0], "Second_date": result["date2"]}
-    )
+    data = pd.DataFrame({"Ref_date": result["date1"][0], "Second_date": result["date2"]})
     for var in result.columns.difference(["date1", "date2"]):
         if var in [
-            "result_dx", "result_dy", "xcount_x", "xcount_y",
-            "error_x", "error_y", "xcount_z",
+            "result_dx",
+            "result_dy",
+            "xcount_x",
+            "xcount_y",
+            "error_x",
+            "error_y",
+            "xcount_z",
         ]:
             data[var] = result[var].values.cumsum()
     data = data.rename(columns={"result_dx": "dx", "result_dy": "dy"})
@@ -38,10 +41,7 @@ def _baseline_reconstruct_common_ref(result, second_date_list=None):
             {
                 "Ref_date": pd.NaT,
                 "Second_date": second_date_list,
-                **{
-                    var: np.nan
-                    for var in data.columns.difference(["Ref_date", "Second_date"])
-                },
+                **{var: np.nan for var in data.columns.difference(["Ref_date", "Second_date"])},
             }
         )
         positions = np.searchsorted(second_date_list, data["Second_date"].values)
@@ -95,7 +95,8 @@ def test_interpolation_quality_columns_and_padding_contract():
     dates = pd.date_range("2020-01-01", periods=n + 1, freq="5D")
     result = pd.DataFrame(
         {
-            "date1": dates[:-1], "date2": dates[1:],
+            "date1": dates[:-1],
+            "date2": dates[1:],
             "result_dx": np.linspace(0.1, 1.2, n),
             "result_dy": np.linspace(-0.2, 0.9, n),
             "xcount_x": np.linspace(1, 4, n),
@@ -117,8 +118,15 @@ def test_interpolation_quality_columns_and_padding_contract():
     )
 
     assert actual.columns.tolist() == [
-        "date1", "date2", "vx", "vy", "xcount_x", "xcount_y",
-        "error_x", "error_y", "sigma0",
+        "date1",
+        "date2",
+        "vx",
+        "vy",
+        "xcount_x",
+        "xcount_y",
+        "error_x",
+        "error_y",
+        "sigma0",
     ]
     assert actual["date1"].iloc[0] == pd.Timestamp("2019-12-20")
     # Existing redundancy-grid semantics can extend beyond the requested end.
@@ -155,3 +163,23 @@ def test_interpolation_to_data_preserves_day_floor_contract():
         }
     )
     pd.testing.assert_frame_equal(actual, expected, check_exact=True)
+
+
+def test_nonoverlapping_interpolation_preserves_velocity_and_pads_boundaries():
+    dates = pd.date_range("2020-01-01", periods=9, freq="30D")
+    result = pd.DataFrame(
+        {"date1": dates[:-1], "date2": dates[1:], "result_dx": np.full(8, 30.0), "result_dy": np.full(8, -60.0)}
+    )
+    actual = interpolation_core(
+        result,
+        interval_output=30,
+        redundancy=None,
+        unit=1,
+        first_date_interpol=dates[0].to_datetime64(),
+        last_date_interpol=dates[-1].to_datetime64(),
+    )
+
+    np.testing.assert_array_equal(actual["date1"].values, dates[:-1].values)
+    np.testing.assert_array_equal(actual["date2"].values, dates[1:].values)
+    np.testing.assert_allclose(actual["vx"], [np.nan, np.nan, 1, 1, 1, 1, 1, np.nan])
+    np.testing.assert_allclose(actual["vy"], [np.nan, np.nan, -2, -2, -2, -2, -2, np.nan])

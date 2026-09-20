@@ -143,8 +143,13 @@ async def process_blocks_main(
         )
 
         _assign_block_results(
-            dataf_list, block_result, cube.ny,
-            blocks[n][0], blocks[n][2], block.nx, block.ny,
+            dataf_list,
+            block_result,
+            cube.ny,
+            blocks[n][0],
+            blocks[n][2],
+            block.nx,
+            block.ny,
         )
 
         del block_result, block

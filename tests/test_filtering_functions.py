@@ -8,7 +8,17 @@ from ticoi.filtering_functions import dask_filt_warpper, dask_smooth_wrapper, nu
 
 @pytest.mark.parametrize(
     "method",
-    ["median_angle", "vvc_angle", "vvc_angle_mzscore", "z_score", "mz_score", "magnitude", "median_magnitude", "error"],
+    [
+        "median_angle",
+        "vvc_angle",
+        "vvc_angle_mzscore",
+        "z_score",
+        "mz_score",
+        "iqr",
+        "magnitude",
+        "median_magnitude",
+        "error",
+    ],
 )
 def test_numpy_filter_matches_single_chunk_dask(method):
     rng = np.random.default_rng(11)
@@ -19,13 +29,37 @@ def test_numpy_filter_matches_single_chunk_dask(method):
     coords = {"mid_date": np.arange(30), "y": np.arange(3), "x": np.arange(3)}
     vx_numpy = xr.DataArray(vx, dims=("mid_date", "y", "x"), coords=coords)
     vy_numpy = xr.DataArray(vy, dims=("mid_date", "y", "x"), coords=coords)
-    vx_dask = vx_numpy.chunk(vx_numpy.sizes)
-    vy_dask = vy_numpy.chunk(vy_numpy.sizes)
+    data = xr.Dataset({"vx": vx_numpy, "vy": vy_numpy, "errorx": abs(vx_numpy), "errory": abs(vy_numpy)})
 
-    expected = dask_filt_warpper(vx_dask, vy_dask, filt_method=method, axis=0)
-    actual = dask_filt_warpper(vx_numpy, vy_numpy, filt_method=method, axis=0)
+    expected = dask_filt_warpper(data.chunk(data.sizes), filt_method=method, axis=0)
+    actual = dask_filt_warpper(data, filt_method=method, axis=0)
 
     np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@pytest.mark.parametrize("method, threshold", [("vvc_angle", 45), ("flow_angle", 45), ("error", 10), ("iqr", 1.5)])
+def test_dataset_filters_remove_outlier_without_masking_valid_velocities(method, threshold, chunked):
+    from ticoi.cube_data_classxr import CubeDataClass
+
+    dims = ("mid_date", "y", "x")
+    vx = np.broadcast_to(np.array([20.0, 21.0, 22.0, -20.0])[:, None, None], (4, 2, 2)).copy()
+    errors = np.broadcast_to(np.array([1.0, 1.0, 1.0, 200.0])[:, None, None], vx.shape).copy()
+    cube = CubeDataClass()
+    cube.ds = xr.Dataset(
+        {"vx": (dims, vx), "vy": (dims, np.ones_like(vx)), "errorx": (dims, errors), "errory": (dims, errors)},
+        coords={"mid_date": np.arange(4), "y": [0, 1], "x": [0, 1]},
+    )
+    if chunked:
+        cube.ds = cube.ds.chunk({"mid_date": -1, "x": 1, "y": 1})
+    direction = xr.Dataset({"direction": (("y", "x"), np.full((2, 2), 90.0))}, coords={"y": [0, 1], "x": [0, 1]})
+
+    cube.delete_outliers({method: threshold}, direction=direction)
+
+    expected = vx.copy()
+    expected[-1] = np.nan
+    np.testing.assert_allclose(cube.ds["vx"].values, expected)
+    np.testing.assert_array_equal(np.isnan(cube.ds["vy"].values), np.isnan(expected))
 
 
 def test_numpy_smoothing_matches_dask_exactly():
@@ -57,13 +91,9 @@ def test_duplicate_date_jitter_is_reproducible_with_random_state():
     dates = xr.DataArray(dates, dims="mid_date")
     t_out = dates.values[:-1] + np.diff(dates.values) // 2
 
-    first = numpy_smooth_wrapper(
-        values, dates, t_out, t_win=11, order=3, axis=0, random_state=42
-    )
+    first = numpy_smooth_wrapper(values, dates, t_out, t_win=11, order=3, axis=0, random_state=42)
     np.random.uniform(size=100)
-    second = numpy_smooth_wrapper(
-        values, dates, t_out, t_win=11, order=3, axis=0, random_state=42
-    )
+    second = numpy_smooth_wrapper(values, dates, t_out, t_win=11, order=3, axis=0, random_state=42)
 
     np.testing.assert_array_equal(second, first)
 

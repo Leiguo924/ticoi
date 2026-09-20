@@ -1,0 +1,30 @@
+{
+  "input": "demo_cube.nc",
+  "output": "../../../examples/results/config_demo",
+  "filename": "demo_velocity",
+  "load": {
+    "proj": "EPSG:32645"
+  },
+  "preprocess": {
+    "regu": "1",
+    "solver": "LSMR",
+    "proj": "EPSG:32645",
+    "delete_outliers": null
+  },
+  "inversion": {
+    "coef": 100,
+    "iteration": false,
+    "apriori_weight": false,
+    "detect_temporal_decorrelation": false,
+    "linear_operator": false,
+    "interval_output": 30,
+    "redundancy": null,
+    "option_interpol": "spline",
+    "result_quality": "X_contribution"
+  },
+  "processing": {
+    "nb_cpu": 1,
+    "block_size": 0.01,
+    "prefetch_blocks": false
+  }
+}

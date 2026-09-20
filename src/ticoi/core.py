@@ -369,8 +369,7 @@ def inversion_core(
         )
         if linear_operator == "fast" and not fast_supported:
             raise ValueError(
-                "linear_operator='fast' supports LSMR or LSMR_ini with regu='1', "
-                "regu='1accelnotnull', or regu='2'"
+                "linear_operator='fast' supports LSMR or LSMR_ini with regu='1', regu='1accelnotnull', or regu='2'"
             )
         if linear_operator is True and regu not in ("1", "1accelnotnull"):
             raise ValueError(
@@ -379,9 +378,7 @@ def inversion_core(
                 "linear_operator='fast' for regu='2'"
             )
         if regu == "directionxy" and (mean is None or len(mean) != 2):
-            raise ValueError(
-                "regu='directionxy' requires mean=[mean_vx, mean_vy]"
-            )
+            raise ValueError("regu='directionxy' requires mean=[mean_vx, mean_vy]")
         # Split the data, with one dtype per array
         if len(data) == 3:
             data_dates, data_values, data_str = data
@@ -397,20 +394,14 @@ def inversion_core(
             A = construction_a_lf(data_dates, dates_range)
             linear_operator = None
         else:  # use a linear operator to solve the inversion, it is sometimes faster
-            linear_operator = (
-                class_fast_linear_operator()
-                if linear_operator == "fast"
-                else class_linear_operator()
-            )
+            linear_operator = class_fast_linear_operator() if linear_operator == "fast" else class_linear_operator()
             linear_operator.load(
                 find_date_obs(data_dates[:, :2], dates_range), dates_range, coef
             )  # load parameter of the linear operator
             if isinstance(linear_operator, class_fast_linear_operator):
                 if fast_lsmr_maxiter_factor < 1:
                     raise ValueError("fast_lsmr_maxiter_factor must be >= 1")
-                linear_operator.lsmr_maxiter_factor = float(
-                    fast_lsmr_maxiter_factor
-                )
+                linear_operator.lsmr_maxiter_factor = float(fast_lsmr_maxiter_factor)
             A = sp.linalg.LinearOperator(
                 (data_values.shape[0], len(dates_range) - 1),
                 matvec=linear_operator.matvec,
@@ -651,11 +642,7 @@ def inversion_core(
             result_dy_i = result_dy
             result_dx_i = result_dx
 
-        if (
-            fast_requested
-            and fast_fallback_on_limit
-            and diagnostics.get("lsmr_limit_hits", 0) > 0
-        ):
+        if fast_requested and fast_fallback_on_limit and diagnostics.get("lsmr_limit_hits", 0) > 0:
             fast_diagnostics = dict(diagnostics)
             fallback_diagnostics = {}
             fallback_result = inversion_core(
@@ -694,18 +681,13 @@ def inversion_core(
             diagnostics.clear()
             diagnostics.update(fallback_diagnostics)
             for name in additive:
-                diagnostics[name] = (
-                    fallback_diagnostics.get(name, 0)
-                    + fast_diagnostics.get(name, 0)
-                )
+                diagnostics[name] = fallback_diagnostics.get(name, 0) + fast_diagnostics.get(name, 0)
             diagnostics["lsmr_max_iterations"] = max(
                 fallback_diagnostics.get("lsmr_max_iterations", 0),
                 fast_diagnostics.get("lsmr_max_iterations", 0),
             )
             diagnostics["fast_operator_fallbacks"] = 1
-            diagnostics["discarded_fast_lsmr_calls"] = fast_diagnostics.get(
-                "lsmr_calls", 0
-            )
+            diagnostics["discarded_fast_lsmr_calls"] = fast_diagnostics.get("lsmr_calls", 0)
             return fallback_result
 
         if np.isnan(result_dx_i).all():  # no results
@@ -730,7 +712,6 @@ def inversion_core(
 
         # propagate the error
         if result_quality is not None and "Error_propagation" in result_quality:
-
             # Error propagation forms and inverts the dense normal matrix.  A
             # LinearOperator is sufficient for inversion and residuals, but it
             # cannot be consumed by the existing element-wise propagation
@@ -750,10 +731,7 @@ def inversion_core(
                 regularization_normal = regularization.T @ regularization
                 if sp.issparse(regularization_normal):
                     regularization_normal = regularization_normal.toarray()
-                N = np.linalg.inv(
-                    np.asarray(FTWF)
-                    + coef * np.asarray(regularization_normal)
-                )
+                N = np.linalg.inv(np.asarray(FTWF) + coef * np.asarray(regularization_normal))
                 Prop_weight = np.multiply(np.multiply(N @ F.T, W[np.newaxis, :]) * error, W[np.newaxis, :]) @ F @ N
                 sigma0_weight = np.sum(Residu**2 * weight) / (F.shape[0] - F.shape[1])
                 prop_wieght_diag = np.diag(Prop_weight)
@@ -891,8 +869,8 @@ def interpolation_core(
         start_date = pd.to_datetime(first_date_interpol)
 
     x = (
-        dataf["Second_date"].to_numpy() - np.datetime64(start_date)
-    ).astype("timedelta64[D]").astype(np.int64)  # Number of days according to the start_date
+        (dataf["Second_date"].to_numpy() - np.datetime64(start_date)).astype("timedelta64[D]").astype(np.int64)
+    )  # Number of days according to the start_date
     if len(x) <= 1 or (
         np.isin("spline", option_interpol) and len(x) <= 3
     ):  # It is not possible to interpolate, because too few estimation
@@ -916,6 +894,7 @@ def interpolation_core(
         option_interpol, x, dataf, result_quality
     )
 
+    output_step = interval_output if redundancy is None else redundancy
     if redundancy is None:  # No redundancy between two interpolated velocity
         x_regu = np.arange(np.min(x) + (interval_output - np.min(x) % interval_output), np.max(x), interval_output)
     else:  # The overlap between two velocities corresponds to redundancy
@@ -940,7 +919,7 @@ def interpolation_core(
         )
 
     ##  Reconstruct a time series with a given temporal sampling, and a given overlap
-    step = interval_output if redundancy is None else int(interval_output / redundancy)
+    step = 1 if redundancy is None else int(interval_output / redundancy)
     if step >= len(x_regu):
         return pd.DataFrame(
             {
@@ -989,16 +968,14 @@ def interpolation_core(
         if "Error_propagation" in result_quality:
             dataf_lp_columns["error_x"] = error_x * unit / interval_output
             dataf_lp_columns["error_y"] = error_y * unit / interval_output
-            dataf_lp_columns["sigma0"] = np.concatenate(
-                [result["sigma0"][:4], np.full(len(First_date) - 4, np.nan)]
-            )
+            dataf_lp_columns["sigma0"] = np.concatenate([result["sigma0"][:4], np.full(len(First_date) - 4, np.nan)])
     dataf_lp = pd.DataFrame(dataf_lp_columns)
     del x_regu, First_date, Second_date, vx, vy
     output_frames = [dataf_lp]
 
     # Fill with nan values if the first date of the cube which will be interpolated is lower than the first date interpolated for this pixel
     if first_date_interpol is not None and dataf_lp["date1"].iloc[0] > pd.Timestamp(first_date_interpol):
-        first_date = np.arange(first_date_interpol, dataf_lp["date1"].iloc[0], np.timedelta64(redundancy, "D"))
+        first_date = np.arange(first_date_interpol, dataf_lp["date1"].iloc[0], np.timedelta64(output_step, "D"))
         # dataf_lp = full_with_nan(dataf_lp, first_date=first_date,
         #                          second_date=first_date + np.timedelta64(interval_output, 'D'))
         nul_columns = {
@@ -1020,9 +997,9 @@ def interpolation_core(
     # Fill with nan values if the last date of the cube which will be interpolated is higher than the last date interpolated for this pixel
     if last_date_interpol is not None and dataf_lp["date2"].iloc[-1] < pd.Timestamp(last_date_interpol):
         first_date = np.arange(
-            dataf_lp["date2"].iloc[-1] + np.timedelta64(redundancy, "D"),
-            last_date_interpol + np.timedelta64(redundancy, "D"),
-            np.timedelta64(redundancy, "D"),
+            dataf_lp["date2"].iloc[-1] + np.timedelta64(output_step, "D"),
+            last_date_interpol + np.timedelta64(output_step, "D"),
+            np.timedelta64(output_step, "D"),
         )
         nul_df = pd.DataFrame(
             {
@@ -1065,20 +1042,16 @@ def interpolation_to_data(
     dataf = reconstruct_common_ref(result)  # Build cumulative displacement time series
     start_date = dataf["Ref_date"][0]  # First date at the considered pixel
     x = (
-        dataf["Second_date"].to_numpy() - np.datetime64(start_date)
-    ).astype("timedelta64[D]").astype(np.int64)  # Number of days according to the start_date
+        (dataf["Second_date"].to_numpy() - np.datetime64(start_date)).astype("timedelta64[D]").astype(np.int64)
+    )  # Number of days according to the start_date
 
     # Interpolation must be caried out in between the min and max date of the original data
     if data["date1"].min() < result["date2"].min() or data["date2"].max() > result["date2"].max():
         data = data[(data["date1"] > result["date2"].min()) & (data["date2"] < result["date2"].max())]
 
     # Ground truth first and second dates
-    x_gt_date1 = (
-        data["date1"].to_numpy() - np.datetime64(start_date)
-    ).astype("timedelta64[D]").astype(np.int64)
-    x_gt_date2 = (
-        data["date2"].to_numpy() - np.datetime64(start_date)
-    ).astype("timedelta64[D]").astype(np.int64)
+    x_gt_date1 = (data["date1"].to_numpy() - np.datetime64(start_date)).astype("timedelta64[D]").astype(np.int64)
+    x_gt_date2 = (data["date2"].to_numpy() - np.datetime64(start_date)).astype("timedelta64[D]").astype(np.int64)
 
     ##  Interpolate the displacements and convert to velocities
     # Compute the functions used to interpolate
@@ -1365,9 +1338,7 @@ def _assign_block_results(dataf_list, block_result, cube_ny, x_start, y_start, b
     for local_col in range(block_nx):
         source_start = local_col * block_ny
         target_start = (local_col + x_start) * cube_ny + y_start
-        dataf_list[target_start : target_start + block_ny] = block_result[
-            source_start : source_start + block_ny
-        ]
+        dataf_list[target_start : target_start + block_ny] = block_result[source_start : source_start + block_ny]
 
 
 def process_blocks_refine(
@@ -1425,22 +1396,9 @@ def process_blocks_refine(
         if isinstance(inversion_kwargs, dict):
             inversion_kwargs.update({"flag": flag_block})
 
-        # There is no data on the whole block (masked data)
-        if obs_filt is None and "interp" in returned:
-            if inversion_kwargs["result_quality"] is not None and "Norm_residual" in inversion_kwargs["result_quality"]:
-                return [
-                    pd.DataFrame(
-                        {"date1": [], "date2": [], "vx": [], "vy": [], "xcount_x": [], "xcount_y": [], "NormR": []}
-                    )
-                ]
-            else:
-                return [
-                    pd.DataFrame(
-                        {"First_date": [], "Second_date": [], "vx": [], "vy": [], "xcount_x": [], "xcount_y": []}
-                    )
-                ]
-
-        xy_values_tqdm = tqdm(xy_values, total=(obs_filt["x"].shape[0] * obs_filt["y"].shape[0]))
+        # A missing prior is valid for solvers that do not need initialization.
+        # Let process() handle empty pixels individually, preserving block shape.
+        xy_values_tqdm = tqdm(xy_values, total=block.nx * block.ny)
         result_block = Parallel(n_jobs=nb_cpu, verbose=0)(
             delayed(process)(block, i, j, obs_filt=obs_filt, returned=returned, **inversion_kwargs)
             for i, j in xy_values_tqdm
@@ -1468,9 +1426,7 @@ def process_blocks_refine(
                 # Strict single-block mode: synchronous loading guarantees no
                 # next block can become resident before this iteration ends.
                 x_start, x_end, y_start, y_end = blocks[n]
-                block, block_flag, duration = load_block(
-                    cube, x_start, x_end, y_start, y_end, flag
-                )
+                block, block_flag, duration = load_block(cube, x_start, x_end, y_start, y_end, flag)
             else:
                 # Load the first block and start the overlapped pipeline.
                 if n == 0:
@@ -1493,12 +1449,16 @@ def process_blocks_refine(
             )  # Process TICOI
 
             _assign_block_results(
-                dataf_list, block_result, cube.ny,
-                blocks[n][0], blocks[n][2], block.nx, block.ny,
+                dataf_list,
+                block_result,
+                cube.ny,
+                blocks[n][0],
+                blocks[n][2],
+                block.nx,
+                block.ny,
             )
 
             del block_result, block
-
 
         if isinstance(returned, list) and len(returned) > 1:
             dataf_list = {returned[r]: [dataf_list[i][r] for i in range(len(dataf_list))] for r in range(len(returned))}

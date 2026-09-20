@@ -64,9 +64,15 @@ def test_chunk_to_block_uses_largest_spatial_chunks_for_budget():
 
     blocks = chunk_to_block(cube, block_size=max_tile_bytes * 1.01 / 1024**3)
     assert blocks == [
-        [0, 1, 0, 1], [1, 9, 0, 1], [9, 10, 0, 1],
-        [0, 1, 1, 9], [1, 9, 1, 9], [9, 10, 1, 9],
-        [0, 1, 9, 10], [1, 9, 9, 10], [9, 10, 9, 10],
+        [0, 1, 0, 1],
+        [1, 9, 0, 1],
+        [9, 10, 0, 1],
+        [0, 1, 1, 9],
+        [1, 9, 1, 9],
+        [9, 10, 1, 9],
+        [0, 1, 9, 10],
+        [1, 9, 9, 10],
+        [9, 10, 9, 10],
     ]
 
     coverage = np.zeros((cube.ny, cube.nx), dtype=np.uint8)
@@ -74,11 +80,7 @@ def test_chunk_to_block_uses_largest_spatial_chunks_for_budget():
     for x_start, x_end, y_start, y_end in blocks:
         coverage[y_start:y_end, x_start:x_end] += 1
         assert ds.isel(x=slice(x_start, x_end), y=slice(y_start, y_end)).nbytes <= max_tile_bytes
-        local_results = [
-            x * cube.ny + y
-            for x in range(x_start, x_end)
-            for y in range(y_start, y_end)
-        ]
+        local_results = [x * cube.ny + y for x in range(x_start, x_end) for y in range(y_start, y_end)]
         _assign_block_results(
             assembled,
             local_results,
@@ -109,9 +111,7 @@ def test_assign_block_results_matches_pixel_loop_exactly():
         expected[col * cube_ny + row] = value
 
     actual = [None] * len(expected)
-    _assign_block_results(
-        actual, results, cube_ny, x_start, y_start, block_nx, block_ny
-    )
+    _assign_block_results(actual, results, cube_ny, x_start, y_start, block_nx, block_ny)
 
     assert all(got is reference for got, reference in zip(actual, expected))
 
@@ -119,16 +119,11 @@ def test_assign_block_results_matches_pixel_loop_exactly():
 def test_stable_ground_coordinates_preserve_sel_order_for_both_dim_orders():
     x = np.array([30.0, 10.0, -5.0])
     y = np.array([8.0, 2.0, -4.0, -9.0])
-    values_yx = np.array(
-        [[0, 1, 0], [2, 0, 1], [0, 0, 2], [1, 0, 0]], dtype=np.int8
-    )
-    for dims, values in ((('y', 'x'), values_yx), (('x', 'y'), values_yx.T)):
+    values_yx = np.array([[0, 1, 0], [2, 0, 1], [0, 0, 2], [1, 0, 0]], dtype=np.int8)
+    for dims, values in ((("y", "x"), values_yx), (("x", "y"), values_yx.T)):
         flag = xr.Dataset({"flag": (dims, values)}, coords={"x": x, "y": y})
         expected = [
-            (xv, yv)
-            for xv in flag["x"].values
-            for yv in flag["y"].values
-            if flag.sel(x=xv, y=yv)["flag"].values == 0
+            (xv, yv) for xv in flag["x"].values for yv in flag["y"].values if flag.sel(x=xv, y=yv)["flag"].values == 0
         ]
 
         actual = _stable_ground_coordinates(flag)
@@ -195,10 +190,51 @@ def test_block_prefetch_can_be_disabled_without_changing_results(monkeypatch):
         "visual": False,
     }
 
-    bounded = process_blocks_refine(
-        cube, nb_cpu=1, returned="raw", inversion_kwargs=kwargs, prefetch_blocks=False
-    )
+    bounded = process_blocks_refine(cube, nb_cpu=1, returned="raw", inversion_kwargs=kwargs, prefetch_blocks=False)
 
     assert bounded == [0, 1]
     assert events.index("loaded_1") > events.index("processed_0")
     assert FakeBlock.max_live == 1
+
+
+def test_uninitialized_block_solver_preserves_valid_and_masked_pixels(tmp_path):
+    dates = np.datetime64("2020-01-01", "ns") + np.arange(9) * np.timedelta64(30, "D")
+    values = np.full((8, 2, 2), 120.0, dtype="float32")
+    values[:, 1, 1] = np.nan
+    dataset = xr.Dataset(
+        {
+            "vx": (("mid_date", "y", "x"), values),
+            "vy": (("mid_date", "y", "x"), values / 2),
+            "date1": ("mid_date", dates[:-1]),
+            "date2": ("mid_date", dates[1:]),
+        },
+        coords={"mid_date": dates[:-1] + np.timedelta64(15, "D"), "x": [500000, 500120], "y": [3100120, 3100000]},
+        attrs={"proj4": "+proj=utm +zone=45 +datum=WGS84 +units=m +no_defs"},
+    )
+    path = tmp_path / "cube.nc"
+    dataset.to_netcdf(path, engine="h5netcdf")
+    cube = CubeDataClass()
+    cube.load(str(path), chunks={})
+    common = {"solver": "LSMR", "regu": "1", "proj": "EPSG:32645"}
+    result = process_blocks_refine(
+        cube,
+        nb_cpu=1,
+        prefetch_blocks=False,
+        preData_kwargs=common,
+        inversion_kwargs={
+            **common,
+            "path_save": str(tmp_path),
+            "result_quality": None,
+            "iteration": False,
+            "detect_temporal_decorrelation": False,
+            "redundancy": None,
+        },
+    )
+
+    assert len(result) == 4
+    for pixel in result[:3]:
+        assert len(pixel) == 5
+        np.testing.assert_allclose(pixel["vx"], 120, rtol=1e-5)
+        np.testing.assert_allclose(pixel["vy"], 60, rtol=1e-5)
+        assert (pixel["date2"] - pixel["date1"]).eq(np.timedelta64(30, "D")).all()
+    assert result[3].empty

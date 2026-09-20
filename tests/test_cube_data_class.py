@@ -11,6 +11,7 @@ from ticoi.cube_data_classxr import (
     CubeDataClass,  # Assuming cube_data_class is defined in your_module
     _unique_valid_dates,
 )
+from ticoi.example import get_path
 
 
 def test_unique_valid_dates_loads_each_lazy_array_once():
@@ -97,7 +98,6 @@ def test_filter_expands_baseline_selection_when_initial_threshold_has_no_observa
 
     assert selected_counts == [9, 9]
     assert result.sizes["mid_date"] == 2
-from ticoi.example import get_path
 
 
 class Testclass_cube_data_xr:
